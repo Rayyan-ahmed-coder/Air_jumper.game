@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Air Jumper</title>
+</head>
+<body>
+  <div class="hud">
+    <div class="score" id="score">0</div>
+    <div class="hint">Press <strong>SPACE</strong> or click/tap to jump. Dodge the pipes and stay airborne.</div>
+  </div>
+  <canvas id="gameCanvas" width="420" height="620"></canvas>
+  <div class="overlay visible" id="startOverlay">
+    <div class="panel">
+      <h1>Air Jumper</h1>
+      <p>Fly through glowing pipes, collect points, and survive as long as you can. Tap or press space to begin.</p>
+      <button class="button" id="startButton">Start</button>
+    </div>
+  </div>
+  <div class="overlay" id="gameOverOverlay">
+    <div class="panel">
+      <h1>Game Over</h1>
+      <p id="finalMessage">You made it through the sky!</p>
+      <button class="button" id="retryButton">Try Again</button>
+    </div>
+  </div>
+  <div class="hit-flash" id="hitFlash"></div>
+</body>
+</html>

@@ -1,0 +1,133 @@
+:root {
+    --bg: #08101f;
+    --sky: #15233d;
+    --pipe: #29b6f6;
+    --pipe-shadow: #176b8e;
+    --bird: #ffd166;
+    --bird-shadow: #f6ae2d;
+    --text: #f5f5f5;
+    --hit: #ff4f79;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at top, #263f6a 0%, #08101f 45%, #020609 100%);
+    color: var(--text);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    overflow: hidden;
+}
+
+canvas {
+    border-radius: 28px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35), inset 0 0 90px rgba(68, 197, 255, 0.12);
+    background: linear-gradient(to bottom, rgba(13, 35, 68, 0.95), rgba(4, 10, 18, 0.98));
+}
+
+.hud {
+    position: absolute;
+    top: 24px;
+    left: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 10;
+    text-shadow: 0 0 12px rgba(0, 0, 0, 0.55);
+}
+
+.hud .score {
+    font-size: 48px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+}
+
+.hud .hint {
+    font-size: 14px;
+    line-height: 1.4;
+    max-width: 320px;
+    color: #d7e5ffcc;
+}
+
+.overlay {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+}
+
+.overlay.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.panel {
+    width: min(90vw, 420px);
+    padding: 28px;
+    border-radius: 24px;
+    background: rgba(1, 9, 22, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    text-align: center;
+    backdrop-filter: blur(12px);
+}
+
+.panel h1 {
+    margin-bottom: 14px;
+    font-size: clamp(2rem, 4vw, 2.5rem);
+    letter-spacing: 0.05em;
+}
+
+.panel p {
+    margin-bottom: 20px;
+    color: #c5d6ff;
+    line-height: 1.6;
+}
+
+.button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 160px;
+    padding: 12px 18px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #4dc0ff, #6b60ff);
+    color: #fff;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 12px 24px rgba(0, 133, 255, 0.25);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 32px rgba(0, 133, 255, 0.32);
+}
+
+.hit-flash {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 79, 121, 0.12);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    mix-blend-mode: screen;
+}
+
+.hit-flash.active {
+    opacity: 1;
+}
