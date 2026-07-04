@@ -12,20 +12,23 @@ const coinScoreEl = document.getElementById('coinScore');
 const game_config = {
     gravity: 0.42,
     jumpStrength: -8.6,
-    pipeGap: 188,
+    pipeGap: 193,
     pipeSpawnRate: 88,
     groundHeight: 64,
     birdRadius: 16,
     pipeSpeed: 3.65,
     coinSpawnRate: 110,
-    treeSpawnRate: 6,
+    treeSpawnRate: 42,
     treeSpeed: 2.6,
-    difficultyRamp: 0.0016
+    difficultyRamp: 0.2
 };
 
 const PIE_2 = Math.PI * 2;
-const width = canvas.width;
-const height = canvas.height;
+const BASE_WIDTH = 820;
+const BASE_HEIGHT = 620;
+let width = BASE_WIDTH;
+let height = BASE_HEIGHT;
+let dpr = Math.min(window.devicePixelRatio || 1, 2);
 
 let bird;
 let pipes;
@@ -48,6 +51,10 @@ let animationFrameId = null;
 
 class Bird {
     constructor() {
+        this.gradient = ctx.createRadialGradient(-4, -4, 4, 0, 0, game_config.birdRadius * 1.5);
+        this.gradient.addColorStop(0, '#fff7b8');
+        this.gradient.addColorStop(0.25, '#ffd166');
+        this.gradient.addColorStop(1, '#f6ae2d');
         this.x = width * 0.22;
         this.y = height / 2;
         this.velocity = 0;
@@ -84,12 +91,7 @@ class Bird {
         ctx.translate(this.x, this.y);
         ctx.rotate(this.rotation);
 
-        const gradient = ctx.createRadialGradient(-4, -4, 4, 0, 0, game_config.birdRadius * 1.5);
-        gradient.addColorStop(0, '#fff7b8');
-        gradient.addColorStop(0.25, '#ffd166');
-        gradient.addColorStop(1, '#f6ae2d');
-
-        ctx.fillStyle = gradient;
+        ctx.fillStyle = this.gradient;
         ctx.shadowColor = 'rgba(255, 209, 102, 0.55)';
         ctx.shadowBlur = 22;
         ctx.beginPath();
@@ -118,7 +120,12 @@ class Pipe {
         this.top = 60 + Math.random() * 250;
         this.bottom = this.top + game_config.pipeGap;
         this.passed = false;
-        this.speed = game_config.pipeSpeed + Math.random() * 0.35 + Math.min(score / 200, 1.4) * 0.3;
+        this.speed = game_config.pipeSpeed + Math.random() * 0.25 + Math.min(score * game_config.difficultyRamp, 1.2) * 0.3;
+        this.topHeight = this.top;
+        this.bottomY = this.bottom;
+        this.bottomHeight = height - this.bottomY;
+        this.capHeight = 24;
+        this.capOffset = 4;
     }
 
     update(dt) {
@@ -127,21 +134,9 @@ class Pipe {
 
     draw() {
         ctx.save();
-        const pipeX = this.x;
-        const pipeW = this.width;
-        const topH = this.top;
-        const botY = this.bottom;
-        const botH = height - botY;
+        const colors = ['#1c9c34', '#28eb59', '#74f193', '#1bd148', '#0f7d2a'];
 
-        const colors = [
-            '#1c9c34',
-            '#28eb59',
-            '#74f193',
-            '#18ca45',
-            '#0f7d2a'
-        ];
-
-        const pipeGradient = ctx.createLinearGradient(pipeX, 0, pipeX + pipeW, 0);
+        const pipeGradient = ctx.createLinearGradient(this.x, 0, this.x + this.width, 0);
         pipeGradient.addColorStop(0.0, colors[0]);
         pipeGradient.addColorStop(0.15, colors[1]);
         pipeGradient.addColorStop(0.4, colors[2]);
@@ -149,18 +144,13 @@ class Pipe {
         pipeGradient.addColorStop(1.0, colors[4]);
 
         ctx.fillStyle = pipeGradient;
-        ctx.shadowColor = 'rgba(69, 118, 255, 0.51)';
-        ctx.shadowBlur = 20;
-        ctx.fillRect(pipeX, 0, pipeW, topH);
-        ctx.fillRect(pipeX, botY, pipeW, botH);
+        ctx.shadowColor = 'rgba(69, 118, 255, 0.45)';
+        ctx.shadowBlur = 16;
+        ctx.fillRect(this.x, 0, this.width, this.topHeight);
+        ctx.fillRect(this.x, this.bottomY, this.width, this.bottomHeight);
         ctx.shadowBlur = 0;
 
-        const capH = 24;
-        const capO = 4;
-        const capX = pipeX - capO;
-        const capW = pipeW + (capO * 2);
-
-        const capGradient = ctx.createLinearGradient(capX, 0, capX + capW, 0);
+        const capGradient = ctx.createLinearGradient(this.x - this.capOffset, 0, this.x + this.width + this.capOffset, 0);
         capGradient.addColorStop(0.0, colors[0]);
         capGradient.addColorStop(0.15, colors[1]);
         capGradient.addColorStop(0.4, colors[2]);
@@ -168,19 +158,19 @@ class Pipe {
         capGradient.addColorStop(1.0, colors[4]);
         ctx.fillStyle = capGradient;
 
-        ctx.fillRect(capX, topH - capH, capW, capH);
-        ctx.fillRect(capX, botY, capW, capH);
+        ctx.fillRect(this.x - this.capOffset, this.topHeight - this.capHeight, this.width + this.capOffset * 2, this.capHeight);
+        ctx.fillRect(this.x - this.capOffset, this.bottomY, this.width + this.capOffset * 2, this.capHeight);
+
         ctx.fillStyle = '#112b41';
-        ctx.fillRect(capX, topH - 4, capW, 4);
-        ctx.fillRect(capX, botY, capW, 4);
+        ctx.fillRect(this.x - this.capOffset, this.topHeight - 4, this.width + this.capOffset * 2, 4);
+        ctx.fillRect(this.x - this.capOffset, this.bottomY, this.width + this.capOffset * 2, 4);
 
         ctx.strokeStyle = '#0a1d2d';
         ctx.lineWidth = 2;
-
-        ctx.strokeRect(pipeX, 0, pipeW, topH - capH);
-        ctx.strokeRect(capX, topH - capH, capW, capH);
-        ctx.strokeRect(capX, botY, capW, capH);
-        ctx.strokeRect(pipeX, botY + capH, pipeW, botH - capH);
+        ctx.strokeRect(this.x, 0, this.width, this.topHeight - this.capHeight);
+        ctx.strokeRect(this.x - this.capOffset, this.topHeight - this.capHeight, this.width + this.capOffset * 2, this.capHeight);
+        ctx.strokeRect(this.x - this.capOffset, this.bottomY, this.width + this.capOffset * 2, this.capHeight);
+        ctx.strokeRect(this.x, this.bottomY + this.capHeight, this.width, this.bottomHeight - this.capHeight);
         ctx.restore();
     }
 
@@ -198,7 +188,7 @@ class Coin {
     constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.size = 18;
+        this.size = 20;
         this.collected = false;
     }
 
@@ -225,8 +215,13 @@ class Coin {
     }
 
     collidesWith(bird) {
-        const b = bird.getBounds();
-        return b.right > this.x - this.size && b.left < this.x + this.size && b.bottom > this.y - this.size && b.top < this.y + this.size;
+        const dx = bird.x - this.x;
+        const dy = bird.y - this.y;
+
+        const distance =
+            Math.sqrt(dx * dx + dy * dy);
+
+        return distance < game_config.birdRadius + this.size / 2;
     }
 }
 
@@ -235,14 +230,14 @@ class Tree {
         this.scale = 0.7 + Math.random() * 0.7;
         this.y = height - game_config.groundHeight - 2;
         this.x = width + 40;
-        this.speed = game_config.treeSpeed + Math.random() * 0.5;
+        this.speed = game_config.treeSpeed + Math.random() * 0.35 + Math.max(score * game_config.difficultyRamp, 1.5);
         this.swing = Math.random() * 0.03;
         this.phase = Math.random() * Math.PI * 2;
     }
 
     update(dt) {
         this.x -= this.speed * (dt / 16.67);
-        this.phase += 0.03 * (dt / 16.67);
+        this.phase += 0.01 * (dt / 16.67);
     }
 
     draw() {
@@ -291,7 +286,7 @@ class Cloud {
     reset() {
         this.x = width + Math.random() * 220;
         this.y = 30 + Math.random() * (height * 0.3);
-        this.scale = 0.6 + Math.random() * 0.8;
+        this.scale = 0.7 + Math.random() * 0.8;
         this.speed = 0.3 + Math.random() * 0.6;
     }
 
@@ -306,7 +301,7 @@ class Cloud {
         ctx.save();
         ctx.translate(this.x, this.y);
         ctx.scale(this.scale, this.scale);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.32)';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.44)';
         ctx.beginPath();
         ctx.arc(0, 0, 26, 0, PIE_2);
         ctx.arc(28, -10, 24, 0, PIE_2);
@@ -344,6 +339,31 @@ class Star {
     }
 }
 
+function resizeCanvas() {
+    const maxWidth = Math.min(window.innerWidth - 24, BASE_WIDTH);
+    const maxHeight = Math.min(window.innerHeight - 24, BASE_HEIGHT);
+    const scale = Math.min(maxWidth / BASE_WIDTH, maxHeight / BASE_HEIGHT, 1);
+
+    canvas.style.width = `${Math.round(BASE_WIDTH * scale)}px`;
+    canvas.style.height = `${Math.round(BASE_HEIGHT * scale)}px`;
+
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(BASE_WIDTH * dpr);
+    canvas.height = Math.round(BASE_HEIGHT * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+
+    width = BASE_WIDTH;
+    height = BASE_HEIGHT;
+
+    if (gameState === 'running') {
+        initGame();
+    } else if (bird) {
+        bird.x = width * 0.22;
+        bird.y = height / 2;
+    }
+}
+
 function initGame() {
     if (animationFrameId) {
         cancelAnimationFrame(animationFrameId);
@@ -351,8 +371,8 @@ function initGame() {
 
     bird = new Bird();
     pipes = [];
-    clouds = Array.from({ length: 6 }, () => new Cloud());
-    stars = Array.from({ length: 70 }, () => new Star());
+    clouds = Array.from({ length: window.innerWidth > 768 ? 6 : 4 }, () => new Cloud());
+    stars = Array.from({ length: Math.max(36, Math.min(70, Math.round((width / BASE_WIDTH) * 70))) }, () => new Star());
     trees = [];
     coins = [];
     frameCount = 0;
@@ -463,6 +483,10 @@ function gameLoop(timestamp) {
         lastPipeTime = frameCount;
     }
 
+    if (pipes.length > 12) {
+        pipes.splice(0, pipes.length - 12);
+    }
+
     if (frameCount - lastTreeTime > game_config.treeSpawnRate - Math.min(score * game_config.difficultyRamp, 16)) {
         trees.push(new Tree());
         lastTreeTime = frameCount;
@@ -479,7 +503,7 @@ function gameLoop(timestamp) {
     pipes = pipes.filter(pipe => pipe.x + pipe.width > -20);
     coins.forEach(coin => coin.update(dt));
     coins = coins.filter(coin => !coin.collected && coin.x + coin.size > -20);
-    trees.forEach(tree => tree.update(dt));
+    trees = trees.filter(tree => tree.x + 80 > -20);
 
     pipes.forEach(pipe => {
         pipe.draw();
@@ -527,6 +551,10 @@ function gameLoop(timestamp) {
 function jumpAction() {
     if (gameState === 'start') {
         initGame();
+        if (bird) {
+            bird.jump();
+        }
+        return;
     }
     if (gameState === 'over') return;
     bird.jump();
@@ -547,3 +575,5 @@ window.addEventListener('pointerdown', () => {
 
 startButton.addEventListener('click', initGame);
 retryButton.addEventListener('click', initGame);
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
