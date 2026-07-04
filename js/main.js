@@ -117,7 +117,7 @@ class Pipe {
     constructor() {
         this.width = 78;
         this.x = width + this.width;
-        this.top = 60 + Math.random() * 250;
+        this.top = 65 + Math.random() * 250;
         this.bottom = this.top + game_config.pipeGap;
         this.passed = false;
         this.speed = game_config.pipeSpeed + Math.random() * 0.25 + Math.min(score * game_config.difficultyRamp, 1.2) * 0.3;
@@ -193,7 +193,7 @@ class Coin {
     }
 
     update(dt) {
-        this.x -= (game_config.pipeSpeed + 0.7) * (dt / 16.67);
+        this.x -= this.speed = game_config.pipeSpeed + Math.min(score * game_config.difficultyRamp, 1.4) * 0.3;
     }
 
     draw() {
@@ -230,7 +230,7 @@ class Tree {
         this.scale = 0.7 + Math.random() * 0.7;
         this.y = height - game_config.groundHeight - 2;
         this.x = width + 40;
-        this.speed = game_config.treeSpeed + Math.random() * 0.35 + Math.max(score * game_config.difficultyRamp, 1.5);
+        this.speed = game_config.pipeSpeed + Math.random() * 0.25 + Math.min(score * game_config.difficultyRamp, 1.2) * 0.3;
         this.swing = Math.random() * 0.03;
         this.phase = Math.random() * Math.PI * 2;
     }
