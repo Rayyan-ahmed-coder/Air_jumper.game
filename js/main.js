@@ -18,7 +18,7 @@ const game_config = {
     birdRadius: 16,
     pipeSpeed: 3.65,
     coinSpawnRate: 110,
-    treeSpawnRate: 42,
+    treeSpawnRate: Math.random() * 35,
     treeSpeed: 2.6,
     difficultyRamp: 0.2
 };
