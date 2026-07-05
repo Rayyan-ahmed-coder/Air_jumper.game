@@ -23,8 +23,17 @@ body {
     background: radial-gradient(circle at top, #263f6a 0%, #08101f 45%, #020609 100%);
     color: var(--text);
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    overflow: hidden;
-    padding: 12px;
+    overflow: auto;
+    padding: 18px;
+}
+
+main {
+    position: relative;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
 }
 
 canvas {
@@ -54,13 +63,34 @@ canvas {
     letter-spacing: 0.06em;
 }
 
-.score, #coinScore {
-    display: inline;
+.meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
 }
 
-#coinScore {
-    color: rgb(235, 235, 29);
-    font-size: 2rem;
+.meta-pill {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 82px;
+    padding: 8px 12px;
+    border-radius: 100vw;
+    background: rgba(3, 10, 20, 0.68);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    backdrop-filter: blur(8px);
+}
+
+.meta-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: #cbe7ff;
+}
+
+.meta-pill strong {
+    font-size: 1rem;
+    color: #ffd84a;
 }
 
 .hud .hint {
@@ -68,6 +98,42 @@ canvas {
     line-height: 1.4;
     max-width: min(320px, 70vw);
     color: #d7e5ffcc;
+}
+
+.info-card {
+    width: min(100%, 820px);
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 18px;
+    border-radius: 20px;
+    background: rgba(2, 10, 20, 0.78);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.2);
+}
+
+.info-card h2 {
+    margin-bottom: 6px;
+    font-size: 1.1rem;
+}
+
+.info-card p,
+.info-card li {
+    color: #cddfff;
+    line-height: 1.55;
+}
+
+.info-card ul {
+    display: grid;
+    gap: 6px;
+    list-style: none;
+    padding-left: 0;
+}
+
+.info-card li::before {
+    content: '•';
+    color: #5fe0ff;
+    margin-right: 6px;
 }
 
 .overlay {

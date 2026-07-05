@@ -8,24 +8,26 @@ const retryButton = document.getElementById('retryButton');
 const finalMessage = document.getElementById('finalMessage');
 const hitFlash = document.getElementById('hitFlash');
 const coinScoreEl = document.getElementById('coinScore');
+const bestScoreEl = document.getElementById('bestScore');
 
 const game_config = {
     gravity: 0.42,
     jumpStrength: -8.6,
-    pipeGap: 193,
-    pipeSpawnRate: 88,
+    pipeGap: 200,
     groundHeight: 64,
     birdRadius: 16,
-    pipeSpeed: 3.65,
+    pipeSpawnRate: 100,
     coinSpawnRate: 110,
-    treeSpawnRate: Math.random() * 35,
-    treeSpeed: 2.6,
+    treeSpawnRate: 20,
+    pipeSpeed: 3.65,
+    treeSpeed: 3.7,
     difficultyRamp: 0.2
 };
 
 const PIE_2 = Math.PI * 2;
 const BASE_WIDTH = 820;
 const BASE_HEIGHT = 620;
+const STORAGE_KEY = 'air-jumper-stats';
 let width = BASE_WIDTH;
 let height = BASE_HEIGHT;
 let dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -35,6 +37,7 @@ let pipes;
 let clouds;
 let stars;
 let trees;
+let bushes;
 let coins;
 let frameCount;
 let score;
@@ -45,9 +48,35 @@ let gameState = 'start';
 let lastPipeTime = 0;
 let lastCoinTime = 0;
 let lastTreeTime = 0;
+let lastBushTime = 0;
 let flashTimer = 0;
 let lastFrameTime = 0;
 let animationFrameId = null;
+
+function loadStoredStats() {
+    try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (!stored) return;
+
+        const parsed = JSON.parse(stored);
+        if (typeof parsed?.bestScore === 'number' && Number.isFinite(parsed.bestScore)) {
+            bestScore = parsed.bestScore;
+        }
+        if (typeof parsed?.coinCount === 'number' && Number.isFinite(parsed.coinCount)) {
+            coinCount = parsed.coinCount;
+        }
+    } catch (error) {
+        console.warn('Unable to load saved stats', error);
+    }
+}
+
+function saveStoredStats() {
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ bestScore, coinCount }));
+    } catch (error) {
+        console.warn('Unable to save stats', error);
+    }
+}
 
 class Bird {
     constructor() {
@@ -228,52 +257,56 @@ class Coin {
 class Tree {
     constructor() {
         this.scale = 0.7 + Math.random() * 0.7;
-        this.y = height - game_config.groundHeight - 2;
+        this.y = height - game_config.groundHeight + Math.max(Math.random() * 10, 4);
         this.x = width + 40;
-        this.speed = game_config.pipeSpeed + Math.random() * 0.25 + Math.min(score * game_config.difficultyRamp, 1.2) * 0.3;
-        this.swing = Math.random() * 0.03;
-        this.phase = Math.random() * Math.PI * 2;
+        this.speed = game_config.treeSpeed - (this.scale / 3.5) + Math.min(score * game_config.difficultyRamp, 1.2);
     }
 
     update(dt) {
         this.x -= this.speed * (dt / 16.67);
-        this.phase += 0.01 * (dt / 16.67);
     }
 
     draw() {
         ctx.save();
         ctx.translate(this.x, this.y);
         ctx.scale(this.scale, this.scale);
-        const sway = Math.sin(this.phase) * this.swing;
-        ctx.rotate(sway);
 
-        ctx.fillStyle = '#774925';
-        ctx.fillRect(-6, -25, 12, 25);
+        ctx.fillStyle = '#5c3a21';
+        ctx.beginPath();
+        ctx.moveTo(-6, -25);
+        ctx.lineTo(6, -25);
+        ctx.lineTo(8, 0);
+        ctx.quadraticCurveTo(12, 0, 14, 2);
+        ctx.lineTo(-14, 2);
+        ctx.quadraticCurveTo(-12, 0, -8, 0);
+        ctx.closePath();
+        ctx.fill();
 
-        ctx.fillStyle = '#1b4d3e';
-         // Bottom layer
+        // Bottom
+        ctx.fillStyle = '#143d31';
         ctx.beginPath();
         ctx.moveTo(-35, -20);
-        ctx.lineTo(35, -20);
+        ctx.quadraticCurveTo(0, -14, 35, -20);
         ctx.lineTo(0, -55);
         ctx.closePath();
         ctx.fill();
-        ctx.fillStyle = '#1c7038';
-        // Middle layer
+        // Middle
+        ctx.fillStyle = '#1b5e43';
         ctx.beginPath();
         ctx.moveTo(-28, -45);
-        ctx.lineTo(28, -45);
-        ctx.lineTo(0, -75);
+        ctx.quadraticCurveTo(0, -39, 28, -45);
+        ctx.lineTo(0, -80);
         ctx.closePath();
         ctx.fill();
-        ctx.fillStyle = '#19863d';
-        // Top layer
+        // Top
+        ctx.fillStyle = '#227d58';
         ctx.beginPath();
-        ctx.moveTo(-20, -65);
-        ctx.lineTo(20, -65);
-        ctx.lineTo(0, -95);
+        ctx.moveTo(-20, -68);
+        ctx.quadraticCurveTo(0, -63, 20, -68);
+        ctx.lineTo(0, -102);
         ctx.closePath();
         ctx.fill();
+
         ctx.restore();
     }
 }
@@ -364,7 +397,17 @@ function resizeCanvas() {
     }
 }
 
-function initGame() {
+function updateHud() {
+    scoreEl.textContent = score;
+    if (coinScoreEl) {
+        coinScoreEl.textContent = coinCount;
+    }
+    if (bestScoreEl) {
+        bestScoreEl.textContent = bestScore;
+    }
+}
+
+function initGame({ jumpImmediately = true } = {}) {
     if (animationFrameId) {
         cancelAnimationFrame(animationFrameId);
     }
@@ -374,23 +417,24 @@ function initGame() {
     clouds = Array.from({ length: window.innerWidth > 768 ? 6 : 4 }, () => new Cloud());
     stars = Array.from({ length: Math.max(36, Math.min(70, Math.round((width / BASE_WIDTH) * 70))) }, () => new Star());
     trees = [];
+    bushes = [];
     coins = [];
     frameCount = 0;
     score = 0;
-    coinCount = 0;
+    flashTimer = 0;
+    lastFrameTime = 0;
     lastPipeTime = 0;
     lastCoinTime = 0;
     lastTreeTime = 0;
-    flashTimer = 0;
-    lastFrameTime = 0;
+    lastBushTime = 0;
     running = true;
     gameState = 'running';
-    scoreEl.textContent = score;
-    if (coinScoreEl) {
-        coinScoreEl.textContent = coinCount;
-    }
+    updateHud();
     startOverlay.classList.remove('visible');
     gameOverOverlay.classList.remove('visible');
+    if (jumpImmediately && bird) {
+        bird.jump();
+    }
     animationFrameId = requestAnimationFrame(gameLoop);
 }
 
@@ -398,7 +442,9 @@ function endGame() {
     running = false;
     gameState = 'over';
     bestScore = Math.max(bestScore, score);
-    finalMessage.textContent = `Score: ${score} · Best: ${bestScore}`;
+    saveStoredStats();
+    updateHud();
+    finalMessage.textContent = `Score: ${score} · Best: ${bestScore} · Coins: ${coinCount}`;
     gameOverOverlay.classList.add('visible');
     if (animationFrameId) {
         cancelAnimationFrame(animationFrameId);
@@ -470,13 +516,12 @@ function gameLoop(timestamp) {
     drawBackground();
     stars.forEach(star => star.update());
     clouds.forEach(cloud => cloud.update(dt));
+    drawParticles();
+    drawGround();
     trees.forEach(tree => tree.update(dt));
     trees.forEach(tree => tree.draw());
-
     bird.update(dt);
-    drawParticles();
     bird.draw();
-    drawGround();
 
     if (frameCount - lastPipeTime > game_config.pipeSpawnRate - Math.min(score * game_config.difficultyRamp, 18)) {
         pipes.push(new Pipe());
@@ -486,12 +531,10 @@ function gameLoop(timestamp) {
     if (pipes.length > 12) {
         pipes.splice(0, pipes.length - 12);
     }
-
     if (frameCount - lastTreeTime > game_config.treeSpawnRate - Math.min(score * game_config.difficultyRamp, 16)) {
         trees.push(new Tree());
         lastTreeTime = frameCount;
     }
-
     if (frameCount - lastCoinTime > game_config.coinSpawnRate) {
         const minY = 100;
         const maxY = height - game_config.groundHeight - 100;
@@ -510,7 +553,9 @@ function gameLoop(timestamp) {
         if (!pipe.passed && pipe.x + pipe.width < bird.x) {
             score += 1;
             pipe.passed = true;
-            scoreEl.textContent = score;
+            bestScore = Math.max(bestScore, score);
+            updateHud();
+            saveStoredStats();
         }
 
         if (pipe.collidesWith(bird)) {
@@ -524,9 +569,8 @@ function gameLoop(timestamp) {
         if (!coin.collected && coin.collidesWith(bird)) {
             coin.collected = true;
             coinCount += 1;
-            if (coinScoreEl) {
-                coinScoreEl.textContent = coinCount;
-            }
+            updateHud();
+            saveStoredStats();
         }
     });
 
@@ -550,14 +594,13 @@ function gameLoop(timestamp) {
 
 function jumpAction() {
     if (gameState === 'start') {
-        initGame();
-        if (bird) {
-            bird.jump();
-        }
+        initGame({ jumpImmediately: true });
         return;
     }
     if (gameState === 'over') return;
-    bird.jump();
+    if (bird) {
+        bird.jump();
+    }
 }
 
 window.addEventListener('keydown', event => {
@@ -568,12 +611,17 @@ window.addEventListener('keydown', event => {
     }
 });
 
-window.addEventListener('pointerdown', () => {
+window.addEventListener('pointerdown', event => {
+    if (event.target instanceof Element && event.target.closest('button')) {
+        return;
+    }
     if (gameState === 'over') return;
     jumpAction();
 });
 
-startButton.addEventListener('click', initGame);
-retryButton.addEventListener('click', initGame);
+startButton.addEventListener('click', () => initGame({ jumpImmediately: true }));
+retryButton.addEventListener('click', () => initGame({ jumpImmediately: true }));
 window.addEventListener('resize', resizeCanvas);
+loadStoredStats();
+updateHud();
 resizeCanvas();

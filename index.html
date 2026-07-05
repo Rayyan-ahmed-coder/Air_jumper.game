@@ -15,27 +15,53 @@
 	<link rel="icon" href="icons/favicon.ico" type="image/x-icon">
 </head>
 <body>
-  <div class="hud">
-    <div class="score" id="score">0</div>
-    <div id="coinScore">0</div>
-    <div class="hint">Press <strong>SPACE</strong> or click/tap to jump. Dodge the pipes and stay airborne.</div>
-  </div>
-  <canvas id="gameCanvas" width="820" height="620"></canvas>
-  <div class="overlay visible" id="startOverlay">
-    <div class="panel">
-      <h1>Air Jumper</h1>
-      <p>Fly through glowing pipes, collect points, and survive as long as you can. Tap or press space to begin.</p>
-      <button class="button" type="button" id="startButton">Start</button>
+  <main>
+    <div class="hud">
+      <div class="score" id="score">0</div>
+      <div class="meta-row">
+        <div class="meta-pill">
+          <span class="meta-label">Coins:</span>
+          <strong id="coinScore">0</strong>
+        </div>
+        <div class="meta-pill">
+          <span class="meta-label">Best:</span>
+          <strong id="bestScore">0</strong>
+        </div>
+      </div>
+      <div class="hint">Press <strong>SPACE</strong> or click/tap to jump. Dodge the pipes and stay airborne.</div>
     </div>
-  </div>
-  <div class="overlay" id="gameOverOverlay">
-    <div class="panel">
-      <h1>Game Over</h1>
-      <p id="finalMessage">You made it through the sky!</p>
-      <button class="button" id="retryButton">Try Again</button>
+
+    <canvas id="gameCanvas" width="820" height="620"></canvas>
+    <section class="info-card" aria-label="Air Jumper help">
+      <div>
+        <h2>Air Jumper</h2>
+        <p>Collect coins, dodge the glowing pipes, and chase a fresh personal best.</p>
+      </div>
+      <ul>
+        <li>Tap, click, or press Space to fly upward.</li>
+        <li>Grab coins for bonus points and style.</li>
+        <li>Use Start or Try Again to reset the run instantly.</li>
+      </ul>
+    </section>
+
+    <div class="overlay visible" id="startOverlay">
+      <div class="panel">
+        <h1>Air Jumper</h1>
+        <p>Fly through glowing pipes, collect points, and survive as long as you can. Tap or press space to begin.</p>
+        <button class="button" type="button" id="startButton">Start</button>
+      </div>
     </div>
-  </div>
-  <div class="hit-flash" id="hitFlash"></div>
+
+    <div class="overlay" id="gameOverOverlay">
+      <div class="panel">
+        <h1>Game Over</h1>
+        <p id="finalMessage">You made it through the sky!</p>
+        <button class="button" id="retryButton">Try Again</button>
+      </div>
+    </div>
+
+    <div class="hit-flash" id="hitFlash"></div>
+  </main>
   <script src="js/main.js" defer></script>
 </body>
 </html>
