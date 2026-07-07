@@ -938,8 +938,9 @@ function drawBackground() {
     clouds.forEach(cloud => {
         cloud.draw();
     });
+
     if(speedBoostActive) {
-        for(let i=0;i<35;i++){
+        for(let i = 0; i < 35; i++) {
             ctx.strokeStyle="rgba(255,255,255,.12)";
             ctx.beginPath();
             const x = Math.random()*width;
