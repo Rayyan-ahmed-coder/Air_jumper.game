@@ -71,6 +71,33 @@ let flashTimer = 0;
 let lastFrameTime = 0;
 let animationFrameId = null;
 
+const powerUpsState = {
+    shield: false,
+    magnet: false,
+    doubleScore: false,
+    tinyBird: false,
+    slowMotion: false,
+    dash: false,
+    phoenix: false
+};
+
+const powerUpTimers = {
+    magnet: 0,
+    doubleScore: 0,
+    tinyBird: 0,
+    slowMotion: 0,
+    dash: 0
+};
+
+
+let mountainOffset1 = 0;
+let mountainOffset2 = 0;
+let mountainOffset3 = 0;
+
+let birdScale = 1;
+let gameSpeedMultiplier = 1;
+let dashTrail = [];
+
 // Object pools for performance
 const pipePool = [];
 const coinPool = [];
@@ -116,6 +143,24 @@ function saveStoredStats() {
     }
 }
 
+function hitPlayer() {
+    if (powerUpsState.dash) {
+        return;
+    }
+    if (powerUpsState.shield) {
+        powerUpsState.shield = false;
+        triggerFlash();
+        return;
+    }
+
+    if (powerUpsState.phoenix) {
+        revivePlayer();
+        return;
+    }
+    triggerFlash();
+    endGame();
+}
+
 class Bird {
     constructor() {
         this.x = width * 0.22;
@@ -128,6 +173,7 @@ class Bird {
         const frameScale = dt / 16.67;
         this.velocity += game_config.gravity * frameScale;
         this.y += this.velocity * frameScale;
+        if (powerUpsState.dash) gameSpeedMultiplier = 3;
         this.rotation = Math.min(Math.max(this.velocity / 16, -0.7), 1.0);
 
         if (this.y < game_config.birdRadius) {
@@ -141,17 +187,19 @@ class Bird {
     }
 
     getBounds() {
+        const r = game_config.birdRadius * birdScale;
         return {
-            left: this.x - game_config.birdRadius,
-            right: this.x + game_config.birdRadius,
-            top: this.y - game_config.birdRadius,
-            bottom: this.y + game_config.birdRadius,
+            left: this.x - r,
+            right: this.x + r,
+            top: this.y - r,
+            bottom: this.y + r
         };
     }
 
     draw() {
         ctx.save();
         ctx.translate(this.x, this.y);
+        ctx.scale(birdScale, birdScale);
         ctx.rotate(this.rotation);
 
         const gradient = ctx.createRadialGradient(-4, -4, 4, 0, 0, game_config.birdRadius * 1.5);
@@ -196,7 +244,7 @@ class Pipe {
     }
 
     update(dt) {
-        this.x -= this.speed * (dt / 16.67);
+        this.x -= this.speed * gameSpeedMultiplier * (dt / 16.67);
     }
 
     draw() {
@@ -251,29 +299,34 @@ class Coin {
     constructor(x, y) {
         this.x = x;
         this.y = y;
+        this.angle = 0; // Renamed from scaleX for semantic clarity
         this.size = 20;
         this.collected = false;
     }
 
     update(dt) {
+        const deltaTime = dt || 16.67;   
         const speed = game_config.pipeSpeed + Math.min(score * game_config.difficultyRamp, 1.4) * 0.3;
-
-this.x -= speed * (dt / 16.67);
+        this.x -= this.speed * gameSpeedMultiplier * (deltaTime / 16.67);
+        this.angle += 0.05 * (deltaTime / 16.67);
     }
 
     draw() {
         ctx.save();
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size / 2, 0, PIE_2);
-        ctx.closePath();
-        ctx.fillStyle = '#ffd22e';
+        ctx.translate(this.x, this.y);
+        const currentScaleX = Math.abs(Math.cos(this.angle));
+        ctx.scale(currentScaleX, 1);
         ctx.shadowColor = 'rgba(233, 200, 94, 0.81)';
         ctx.shadowBlur = 10;
+        ctx.fillStyle = '#ffd22e';
+        ctx.beginPath();
+        ctx.arc(0, 0, this.size / 2, 0, PIE_2);
+        ctx.closePath();
         ctx.fill();
         ctx.strokeStyle = 'rgb(255, 114, 32)';
-        ctx.beginPath();
         ctx.lineWidth = 2;
-        ctx.arc(this.x, this.y, this.size / 2 + 2, 0, PIE_2);
+        ctx.beginPath();
+        ctx.arc(0, 0, (this.size / 2) + 2, 0, fullCircle);
         ctx.closePath();
         ctx.stroke();
         ctx.restore();
@@ -282,10 +335,7 @@ this.x -= speed * (dt / 16.67);
     collidesWith(bird) {
         const dx = bird.x - this.x;
         const dy = bird.y - this.y;
-
-        const distance =
-            Math.sqrt(dx * dx + dy * dy);
-
+        const distance = Math.sqrt(dx * dx + dy * dy);
         return distance < game_config.birdRadius + this.size / 2;
     }
 }
@@ -299,7 +349,7 @@ class Tree {
     }
 
     update(dt) {
-        this.x -= this.speed * (dt / 16.67);
+        this.x -= this.speed * gameSpeedMultiplier * (dt / 16.67);
     }
 
     draw() {
@@ -358,7 +408,7 @@ class Bush {
     }
 
     update(dt) {
-        this.x -= this.speed * (dt / 16.67);
+        this.x -= this.speed * gameSpeedMultiplier * (dt / 16.67);
     }
 
     draw() {
@@ -400,53 +450,64 @@ class Bush {
 }
 
 class PowerUp {
-    constructor(x, y, type = 'shield') {
+    constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.type = type; // 'shield', 'speedBoost'
-        this.size = 16;
+        this.size = 18;
         this.collected = false;
-        this.rotation = 0;
+        this.rotation = Math.random() * Math.PI * 2;
+        const types = [
+            "shield",
+            "magnet",
+            "doubleScore",
+            "tinyBird",
+            "slowMotion",
+            "dash",
+            "phoenix"
+        ];
+        this.type = types[Math.floor(Math.random() * types.length)];
     }
 
     update(dt) {
-        this.x -= (game_config.pipeSpeed + Math.min(score * game_config.difficultyRamp, 1.2) * 0.5) * (dt / 16.67);
+        this.x -= (game_config.pipeSpeed + Math.min(score * game_config.difficultyRamp, 1.2) * 0.5) * gameSpeedMultiplier * (dt / 16.67);
         this.rotation += 0.08;
     }
 
     draw() {
         ctx.save();
-        ctx.translate(this.x, this.y);
+        ctx.translate(this.x,this.y);
+        this.rotation += .03;
         ctx.rotate(this.rotation);
-
-        if (this.type === 'shield') {
-            shieldActive = true;
-            ctx.fillStyle = '#ff6b9d';
-            ctx.shadowColor = 'rgba(255, 107, 157, 0.7)';
-            ctx.shadowBlur = 12;
-            ctx.beginPath();
-            ctx.moveTo(0, -this.size);
-            ctx.lineTo(this.size, -this.size / 2);
-            ctx.lineTo(this.size / 2, this.size);
-            ctx.lineTo(-this.size / 2, this.size);
-            ctx.lineTo(-this.size, -this.size / 2);
-            ctx.closePath();
-            ctx.fill();
-            ctx.strokeStyle = '#ff1493';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-        } else if (this.type === 'speedBoost') {
-            ctx.fillStyle = '#00ff88';
-            ctx.shadowColor = 'rgba(0, 255, 136, 0.7)';
-            ctx.shadowBlur = 12;
-            ctx.beginPath();
-            ctx.arc(0, 0, this.size, 0, PIE_2);
-            ctx.fill();
-            ctx.strokeStyle = '#00cc66';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-        }
-
+        const colors = {
+            shield:"#ff5ca8",
+            magnet:"#ff4040",
+            doubleScore:"#ffd93d",
+            tinyBird:"#55ff99",
+            slowMotion:"#5ac8ff",
+            dash:"#8d5cff",
+            phoenix:"#ff7b00"
+        };
+        ctx.shadowColor = colors[this.type];
+        ctx.shadowBlur = 18;
+        ctx.fillStyle = colors[this.type];
+        ctx.beginPath();
+        ctx.arc(0,0,this.size,0,Math.PI*2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle="white";
+        ctx.font="bold 18px Arial";
+        ctx.textAlign="center";
+        ctx.textBaseline="middle";
+        const icons={
+            shield:"🛡",
+            magnet:"🧲",
+            doubleScore:"×2",
+            tinyBird:"⬇",
+            slowMotion:"❄",
+            dash:"⚡",
+            phoenix:"🔥"
+        };
+        ctx.fillText(icons[this.type],0,1);
         ctx.restore();
     }
 
@@ -476,24 +537,27 @@ class Cloud {
     }
 
     update(dt) {
-        this.x -= this.speed * (dt / 16.67);
+        this.x -= this.speed * gameSpeedMultiplier * (dt / 16.67);
         if (this.x + 20 * this.scale < -20) {
             this.reset();
         }
     }
 
-    draw() {
+    draw(){
         ctx.save();
-        ctx.translate(this.x, this.y);
-        ctx.scale(this.scale, this.scale);
-        ctx.fillStyle = this.g;
-        // ctx.fillStyle = `rgba(255, 255, 255, 0.47)`;
+        ctx.translate(this.x,this.y);
+        ctx.scale(this.scale,this.scale);
+        const g=ctx.createRadialGradient(25, 10, 5, 25, 10, 70);
+        g.addColorStop(0,"rgba(255,255,255,.95)");
+        g.addColorStop(.65,"rgba(255,255,255,.72)");
+        g.addColorStop(1,"rgba(255,255,255,0)");
+        ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(0, 0, 26, 0, PIE_2);
-        ctx.arc(16, -10, 24, 0, PIE_2);
-        ctx.arc(36, -11, 25, 0, PIE_2);
-        ctx.arc(56, 0, 30, 0, PIE_2);
-        ctx.arc(30, 12, 24, 0, PIE_2);
+        ctx.arc(0,8,24,0,PIE_2);
+        ctx.arc(20,-6,26,0,PIE_2);
+        ctx.arc(46,-4,24,0,PIE_2);
+        ctx.arc(70,8,26,0,PIE_2);
+        ctx.arc(35,18,28,0,PIE_2);
         ctx.fill();
         ctx.restore();
     }
@@ -570,7 +634,6 @@ function initGame({ jumpImmediately = true } = {}) {
     pipes = [];
     clouds = Array.from({ length: window.innerWidth > 768 ? 6 : 4 }, () => new Cloud());
     stars = Array.from({ length: Math.max(36, Math.min(70, Math.round((width / BASE_WIDTH) * 70))) }, () => new Star());
-    shootingStars = [];
     trees = [];
     bushes = [];
     coins = [];
@@ -585,9 +648,6 @@ function initGame({ jumpImmediately = true } = {}) {
     lastBushTime = 0;
     lastPowerUpTime = 0;
     shootingStarTimer = 0;
-    dayNightPhase = 0.8;
-    timeOfDay = 'day';
-    transitionAlpha = 0;
     running = true;
     gameState = 'running';
     updateHud();
@@ -643,32 +703,55 @@ function lerpColor(color1, color2, t) {
     return `rgb(${r}, ${g}, ${b})`;
 }
 
-function drawMountains() {
-    const layers = [
-        { color: "#102440", speed: 0.2, height: 210 },
-        { color: "#17375e", speed: 0.4, height: 180 },
-        { color: "#275184", speed: 0.6, height: 140 },
-        { color: "#4c7fbf", speed: 0.8, height: 110 }
-    ];
+function drawFloatingIsland(x, y, scale){
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.scale(scale,scale);
+    // grass
+    ctx.fillStyle="#42d95b";
+    ctx.beginPath()
+    ctx.moveTo(-60,0)
+    ctx.quadraticCurveTo(0,-18,60,0);
+    ctx.lineTo(45,18);
+    ctx.lineTo(-45,18);
+    ctx.closePath();
+    ctx.fill();
+    // rock
+    ctx.fillStyle="#5d6570";
+    ctx.beginPath();
+    ctx.moveTo(-45,18);
+    ctx.lineTo(45,18);
+    ctx.lineTo(20,65);
+    ctx.lineTo(-15,70);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+}
 
-    layers.forEach((layer,index)=>{
-        ctx.fillStyle = layer.color;
+function drawMountainLayer(color, heightOffset, peakHeight, widthSize, offset) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(-widthSize + offset, height);
+    for (let x = -widthSize; x < width + widthSize * 2; x += widthSize) {
+        ctx.lineTo(
+            x + offset,
+            height - heightOffset
+        );
 
-        ctx.beginPath();
-        ctx.moveTo(0,height);
+        ctx.lineTo(
+            x + widthSize * 0.5 + offset,
+            height - heightOffset - peakHeight
+        );
 
-        for(let x=-100; x <=width + 100; x += 120) {
-            const y =
-                height - layer.height +
-                Math.sin((x + frameCount * layer.speed)* 0.01) * 35+
-                Math.sin((x + frameCount * layer.speed)* 0.02) * 18;
-            ctx.lineTo(x, y);
-        }
+        ctx.lineTo(
+            x + widthSize + offset,
+            height - heightOffset
+        );
+    }
 
-        ctx.lineTo(width,height);
-        ctx.closePath();
-        ctx.fill();
-    });
+    ctx.lineTo(width + widthSize, height);
+    ctx.closePath();
+    ctx.fill();
 }
 
 function drawBackground() {
@@ -709,20 +792,10 @@ function drawBackground() {
     ];
 
     blobs.forEach(blob => {
-        const gradient = ctx.createRadialGradient(
-            blob.x,
-            blob.y,
-            0,
-            blob.x,
-            blob.y,
-            blob.r
-        );
-
+        const gradient = ctx.createRadialGradient(blob.x, blob.y, 0, blob.x, blob.y, blob.r);
         gradient.addColorStop(0, blob.color);
         gradient.addColorStop(1, "rgba(255,255,255,0)");
-
         ctx.fillStyle = gradient;
-
         ctx.beginPath();
         ctx.arc(blob.x, blob.y, blob.r, 0, Math.PI * 2);
         ctx.fill();
@@ -771,34 +844,196 @@ function drawBackground() {
         ctx.fillStyle = `rgba(255,255,255,${0.15 * pulse})`;
         ctx.fillRect(x, y, 2, 2);
     }
+    drawFloatingIsland(width * .28 + Math.sin(frameCount * .004) * 25, 170, 0.9);
+    drawFloatingIsland(width * .72 + Math.sin(frameCount * .005 + 2) * 18, 130, .7);
+    mountainOffset1 -= 0.15;
+    mountainOffset2 -= 0.35;
+    mountainOffset3 -= 0.7;
+
+    if (mountainOffset1 <= -420)
+        mountainOffset1 = 0;
+    if (mountainOffset2 <= -360)
+        mountainOffset2 = 0;
+    if (mountainOffset3 <= -300)
+        mountainOffset3 = 0;
+    drawMountainLayer("#2d5da8", 270, 90, 420, mountainOffset1);
+    drawMountainLayer("#4474bf", 220, 130, 360, mountainOffset2);
+    drawMountainLayer("#6fa2ea", 170, 110, 300, mountainOffset3);
+    for (let i = 0; i < 25; i++) {
+        const speed = 1 + Math.sin(i * 17.3) * 0.4 + 1.5;
+        const length = 60 + (Math.sin(i * 9.7) + 1) * 50;
+        // Move RIGHT ➜ LEFT
+        const x = width + length - ((frameCount * speed + i * 145) % (width + length * 2))
+        const y = 40 + i * 22 + Math.sin(frameCount * 0.015 + i * 0.8) * 12;
+        const curve = Math.sin(frameCount * 0.02 + i) * 8;
+        const gradient = ctx.createLinearGradient(x, y, x - length, y);
+
+        gradient.addColorStop(0, `rgba(255, 255, 255, 0.13)`);
+        gradient.addColorStop(0.25, `rgba(255, 255, 255, 0.27)`);
+        gradient.addColorStop(0.75, `rgba(255, 255, 255, 0.45)`);
+        gradient.addColorStop(1, `rgba(255, 255, 255, 0.51)`);
+
+        ctx.strokeStyle = gradient;
+        ctx.lineWidth = 1 + (i % 3);
+        ctx.lineCap = "round";
+
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+
+        ctx.bezierCurveTo(
+            x - length * 0.3, y + curve,
+            x - length * 0.7, y - curve,
+            x - length, y
+        );
+
+        ctx.stroke();
+    }
     stars.forEach(star => {
         star.draw();
     });
+
     clouds.forEach(cloud => {
         cloud.draw();
     });
 }
-function drawGround() {
-    const groundColor = ctx.createLinearGradient(height - game_config.groundHeight, 0, width, height);
-    groundColor.addColorStop(0, 'rgb(97, 199, 57)');
-    groundColor.addColorStop(.6, 'rgb(72, 168, 35)');
-    groundColor.addColorStop(1, 'rgb(72, 168, 35)');
-    const lineColor = 'rgba(30, 130, 45, 0.7)';
-    ctx.fillStyle = groundColor;
-    ctx.fillRect(0, height - game_config.groundHeight, width, game_config.groundHeight);
-    ctx.fillStyle = lineColor;
-    ctx.fillRect(0, height - game_config.groundHeight, width, 4);
+
+function drawPowerUps() {
+    ctx.save();
+    ctx.font = "20px Arial";
+    ctx.textAlign = "left";
+    let y = 35;
+    const icons = {
+        shield: "🛡",
+        magnet: "🧲",
+        doubleScore: "⭐",
+        tinyBird: "🐦",
+        slowMotion: "❄",
+        dash: "⚡",
+        phoenix: "🔥"
+    };
+    for(const key in powerUpsState) {
+        if (powerUpsState[key]) {
+            let text = icons[key];
+            if (powerUpTimers[key]) {
+                text += " "+ Math.ceil(powerUpTimers[key] / 60);
+            }
+            ctx.fillStyle = "white";
+            ctx.fillText(text, 20, y);
+            y += 28;
+        }
+    }
+    ctx.restore();
 }
 
-function drawParticles() {
-    const count = Math.min(game_config.maxParticles, 12);
-    for (let i = 0; i < count; i++) {
-        const offset = Math.sin((frameCount + i * 18) * 0.07) * 4;
-        ctx.fillStyle = `rgba(255, 217, 104, ${0.08 + 0.04 * Math.sin((frameCount + i) * 0.33)})`;
+function drawGround(){
+    const g=ctx.createLinearGradient(0, height-game_config.groundHeight, 0, height);
+    g.addColorStop(0, "#69d63d");
+    g.addColorStop(.5, "#46b02d");
+    g.addColorStop(1, "#2d7e21");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, height - game_config.groundHeight, width, game_config.groundHeight);
+    // grass
+    ctx.fillStyle="#8cff61";
+    ctx.fillRect(0, height - game_config.groundHeight, width, 6);
+    // dirt dots
+    for(let i = 0; i < width; i += 20){
+        ctx.fillStyle = "rgba(0,0,0,.12)";
         ctx.beginPath();
-        ctx.arc(bird.x - 16 - i * 3 + offset, bird.y + 6 + (i % 3) * 3, 2.6, 0, PIE_2);
+        ctx.arc(i, height - 20 + Math.sin(i) * 2, 2, 0, PIE_2); 
         ctx.fill();
     }
+}
+
+function drawDashTrail() {
+    dashTrail.forEach(p => {
+        p.life--;
+        p.size *= .97;
+        ctx.globalAlpha = p.life / 30;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, PIE_2);
+        ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    dashTrail = dashTrail.filter(p => p.life > 0);
+}
+
+function spawnDashParticle(){
+    dashTrail.push({
+        x: bird.x, 
+        y: bird.y,
+        size: 10,
+        life: 30,
+        color: `hsl(${frameCount*8},100%,65%)`
+    });
+}
+
+function activatePowerUp(type){
+    switch(type) {
+        case "shield":
+            powerUpsState.shield = true;
+            break;
+        case "magnet":
+            powerUpsState.magnet = true;
+            powerUpTimers.magnet = 10 * 60;
+            break;
+        case "doubleScore":
+            powerUpsState.doubleScore = true;
+            powerUpTimers.doubleScore = 10 * 60;
+            break;
+        case "tinyBird":
+            powerUpsState.tinyBird = true;
+            powerUpTimers.tinyBird = 10 * 60;
+            birdScale = .55;
+            break;
+        case "slowMotion":
+            powerUpsState.slowMotion = true;
+            powerUpTimers.slowMotion = 12 * 60;
+            gameSpeedMultiplier = .65;
+            break;
+        case "dash":
+            powerUpsState.dash = true;
+            powerUpTimers.dash = 4 * 60;
+            break;
+        case "phoenix": 
+            powerUpsState.phoenix = true; 
+            break;
+    }
+}
+
+function updatePowerUps(){
+    Object.keys(powerUpTimers).forEach(key => {
+        if(powerUpTimers[key] > 0) {
+            powerUpTimers[key]--;
+            if(powerUpTimers[key] == 0){
+                powerUpsState[key] = false;
+            }
+        }
+    });
+
+    if(!powerUpsState.tinyBird){
+        birdScale = 1;
+    }
+
+    if(!powerUpsState.slowMotion) {
+        gameSpeedMultiplier = 1;
+    }
+
+    if(!powerUpsState.dash){
+        bird.x = width * .22;
+    }
+}
+
+function revivePlayer(){
+    powerUpsState.phoenix = false;
+    bird.y = height / 2;
+    bird.velocity = 0;
+    bird.jump();
+    bird.x = width * .22;
+    pipes = pipes.filter(pipe => pipe.x > bird.x + 180);
+    bushes = bushes.filter(bush => bush.x > bird.x + 180);
+    coins = coins.filter(coin => coin.x > bird.x + 120);
+    powerUps = powerUps.filter(p => p.x > bird.x + 120);
 }
 
 function gameLoop(timestamp) {
@@ -811,17 +1046,19 @@ function gameLoop(timestamp) {
     const dt = Math.min(timestamp - lastFrameTime, 32);
     lastFrameTime = timestamp;
     frameCount += 1;
+    updatePowerUps();
 
     ctx.clearRect(0, 0, width, height);
     drawBackground();
     stars.forEach(star => star.update());
     clouds.forEach(cloud => cloud.update(dt));
-    drawParticles();
     drawGround();
+    drawPowerUps();
     trees.forEach(tree => tree.update(dt));
     trees.forEach(tree => tree.draw());
     bushes.forEach(bush => bush.update(dt));
     bushes.forEach(bush => bush.draw());
+    drawDashTrail();
     bird.update(dt);
     bird.draw();
 
@@ -857,9 +1094,24 @@ function gameLoop(timestamp) {
         lastPowerUpTime = frameCount;
     }
 
+    if(powerUpsState.dash) {
+        spawnDashParticle();
+    }
+
+
     pipes.forEach(pipe => pipe.update(dt));
     pipes = pipes.filter(pipe => pipe.x + pipe.width > -20);
-    coins.forEach(coin => coin.update(dt));
+    coins.forEach(coin=> {
+        coin.update(dt);
+        if(powerUpsState.magnet){
+            const dx = bird.x - coin.x;
+            const dy = bird.y - coin.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if(dist < 170) {
+                coin.x += dx * .08;
+                coin.y += dy * .08;
+            }
+        }});
     coins = coins.filter(coin => !coin.collected && coin.x + coin.size > -20);
     bushes = bushes.filter(bush => bush.x + bush.width > -20);
     powerUps.forEach(pu => pu.update(dt));
@@ -869,7 +1121,7 @@ function gameLoop(timestamp) {
     pipes.forEach(pipe => {
         pipe.draw();
         if (!pipe.passed && pipe.x + pipe.width < bird.x) {
-            score += 1;
+            score += powerUpsState.doubleScore? 2 : 1;
             pipe.passed = true;
             bestScore = Math.max(bestScore, score);
             updateHud();
@@ -877,24 +1129,15 @@ function gameLoop(timestamp) {
         }
 
         if (pipe.collidesWith(bird)) {
-            if (shieldActive) {
-                const shieldInterval = setInterval(() => {
-                    shieldActive = false;
-                }, 800);
-                clearInterval(shieldInterval);
-                bird.jump()
-                triggerFlash();
-            } else {
-                triggerFlash();
-                endGame();
-            }
+            hitPlayer();
         }
     });
 
     bushes.forEach(bush => {
         if (bush.collidesWith(bird)) {
+            bird.jump();
             triggerFlash();
-            endGame();
+            score = Math.max(0, score - 1);
         }
     });
 
@@ -903,7 +1146,6 @@ function gameLoop(timestamp) {
         if (!coin.collected && coin.collidesWith(bird)) {
             coin.collected = true;
             coinCount += 1;
-            score += 0.5;
             updateHud();
             saveStoredStats();
         }
@@ -911,30 +1153,15 @@ function gameLoop(timestamp) {
 
     powerUps.forEach(pu => {
         pu.draw();
-        if (!pu.collected && pu.collidesWith(bird)) {
+        if(!pu.collected && pu.collidesWith(bird)){
             pu.collected = true;
-            if (pu.type === 'shield') {
-                score += 5;
-            } else {
-                score += 3;
-            }
+            activatePowerUp(pu.type);
             updateHud();
         }
     });
 
     if (bird.y + game_config.birdRadius >= height - game_config.groundHeight) {
-        if (shieldActive) {
-        const shieldInterval = setInterval(() => {
-            shieldActive = false;
-        }, 800);
-        clearInterval(shieldInterval);
-        bird.jump()
-        triggerFlash();
-        } else {
-            bird.y = height - game_config.groundHeight - game_config.birdRadius;
-            triggerFlash();
-            endGame();
-        }
+        hitPlayer();
     }
 
     if (flashTimer > 0) {
