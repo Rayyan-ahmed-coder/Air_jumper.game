@@ -1021,7 +1021,7 @@ function spawnDashParticle(){
     });
 }
 
-function drawParticles() {
+function drawRainbowTrail() {
     const rainbow = [
         "#ff5e5e",
         "#ffb347",
@@ -1099,15 +1099,13 @@ function updatePowerUps(){
         birdScale = 1;
     }
 
-    if(!powerUpsState.slowMotion) {
-        gameSpeedMultiplier = 1;
-    }
-
     if (powerUpsState.dash) {
         bird.x = width * .35;
     } else {
         bird.x = width * .22;
     }
+
+    gameSpeedMultiplier = powerUpsState.dash? 2 : powerUpsState.slowMotion ? 0.65 : 1;
 }
 
 function revivePlayer(){
@@ -1155,7 +1153,7 @@ function gameLoop(timestamp) {
     bushes.forEach(bush => bush.update(dt));
     bushes.forEach(bush => bush.draw());
     drawDashTrail();
-    drawParticles();
+    drawRainbowTrail();
     bird.update(dt);
     bird.draw();
 
