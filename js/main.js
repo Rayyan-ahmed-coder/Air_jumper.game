@@ -919,7 +919,6 @@ function drawBackground() {
         ctx.strokeStyle = gradient;
         ctx.lineWidth = 1 + (i % 3);
         ctx.lineCap = "round";
-
         ctx.beginPath();
         ctx.moveTo(x, y);
 
@@ -938,13 +937,12 @@ function drawBackground() {
     clouds.forEach(cloud => {
         cloud.draw();
     });
-
-    if(speedBoostActive) {
+    if(powerUpsState.dash) {
         for(let i = 0; i < 35; i++) {
-            ctx.strokeStyle="rgba(255,255,255,.12)";
+            ctx.strokeStyle = "rgba(255,255,255,.12)";
             ctx.beginPath();
-            const x = Math.random()*width;
-            const y = Math.random()*height;
+            const x = Math.random() * width;
+            const y = Math.random() * height;
             ctx.moveTo(x, y);
             ctx.lineTo(x - 50, y);
             ctx.stroke();
