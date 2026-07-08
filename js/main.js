@@ -49,7 +49,6 @@ let bird;
 let pipes;
 let clouds;
 let stars;
-let nightStars; // Extra stars for spectacular night
 let trees;
 let bushes;
 let coins;
@@ -174,7 +173,7 @@ class Bird {
         const frameScale = dt / 16.67;
         this.velocity += game_config.gravity * frameScale;
         this.y += this.velocity * frameScale;
-        this.rotation = Math.min(Math.max(this.velocity / 16, -0.7), 1.0);
+        this.rotation += (Math.min(Math.max(this.velocity / 16, -0.7), 1) - this.rotation) * 0.2;
 
         if (this.y < game_config.birdRadius) {
             this.y = game_config.birdRadius;
@@ -456,8 +455,7 @@ class Bush {
         const by = this.y;
         const dx = bird.x - bx;
         const dy = bird.y - by;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        return distance < game_config.birdRadius + 20;
+        return dx*dx+dy*dy < (game_config.birdRadius + 20) * (game_config.birdRadius + 20);
     }
 }
 
@@ -526,8 +524,7 @@ class PowerUp {
     collidesWith(bird) {
         const dx = bird.x - this.x;
         const dy = bird.y - this.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        return distance < game_config.birdRadius + this.size;
+        return dx*dx+dy*dy < (game_config.birdRadius + this.size) * (game_config.birdRadius + this.size);
     }
 }
 
@@ -1121,163 +1118,167 @@ function revivePlayer(){
 }
 
 function gameLoop(timestamp) {
-    if (!running) return;
-    ctx.save();
-    if(screenShake > 0){
-        ctx.translate(
-            (Math.random() - .5) * screenShake,
-            (Math.random() - .5) * screenShake
-        );
-        screenShake *= .9;
-        if (screenShake < .15)
-            screenShake = 0;
-    }
-
-    if (!lastFrameTime) {
-        lastFrameTime = timestamp;
-    }
-
-    const dt = Math.min(timestamp - lastFrameTime, 32);
-    lastFrameTime = timestamp;
-    frameCount += 1;
-    updatePowerUps();
-
-    ctx.clearRect(0, 0, width, height);
-    drawBackground();
-    stars.forEach(star => star.update());
-    clouds.forEach(cloud => cloud.update(dt));
-    drawGround();
-    drawPowerUps();
-    trees.forEach(tree => tree.update(dt));
-    trees.forEach(tree => tree.draw());
-    bushes.forEach(bush => bush.update(dt));
-    bushes.forEach(bush => bush.draw());
-    drawDashTrail();
-    drawRainbowTrail();
-    bird.update(dt);
-    bird.draw();
-
-    if (frameCount - lastPipeTime > game_config.pipeSpawnRate - Math.min(score * game_config.difficultyRamp, 18)) {
-        pipes.push(new Pipe());
-        lastPipeTime = frameCount;
-    }
-
-    if (pipes.length > game_config.maxPipes) {
-        pipes.splice(0, pipes.length - game_config.maxPipes);
-    }
-    if (frameCount - lastTreeTime > game_config.treeSpawnRate - Math.min(score * game_config.difficultyRamp, 16) * 0.25) {
-        trees.push(new Tree());
-        lastTreeTime = frameCount;
-    }
-    if (frameCount - lastBushTime > game_config.treeSpawnRate + 26 - Math.min(score * game_config.difficultyRamp, 14)) {
-        bushes.push(new Bush());
-        lastBushTime = frameCount;
-    }
-    if (frameCount - lastCoinTime > game_config.coinSpawnRate) {
-        const minY = 100;
-        const maxY = height - game_config.groundHeight - 100;
-        coins.push(new Coin(width + 40, minY + Math.random() * (maxY - minY)));
-        lastCoinTime = frameCount;
-    }
-    
-    // Spawn power-ups occasionally
-    if (frameCount - lastPowerUpTime > game_config.coinSpawnRate * 2.5 && Math.random() > 0.6) {
-        const minY = 100;
-        const maxY = height - game_config.groundHeight - 100;
-        powerUps.push(new PowerUp(width + 40, minY + Math.random() * (maxY - minY)));
-        lastPowerUpTime = frameCount;
-    }
-
-    if(powerUpsState.dash) {
-        spawnDashParticle();
-    }
-
-
-    pipes.forEach(pipe => pipe.update(dt));
-    pipes = pipes.filter(pipe => pipe.x + pipe.width > -20);
-    coins.forEach(coin=> {
-        coin.update(dt);
-        if(powerUpsState.magnet){
-            const dx = bird.x - coin.x;
-            const dy = bird.y - coin.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if(dist < 170) {
-                coin.x += dx * .08;
-                coin.y += dy * .08;
-            }
-        }});
-    coins = coins.filter(coin => !coin.collected && coin.x + coin.size > -20);
-    bushes = bushes.filter(bush => bush.x + bush.width > -20);
-    powerUps.forEach(pu => pu.update(dt));
-    powerUps = powerUps.filter(pu => !pu.collected && pu.x + pu.size > -20);
-    particles = particles.filter(p => p.life > 0);
-    trees = trees.filter(tree => tree.x + 80 > -20);
-
-    pipes.forEach(pipe => {
-        pipe.draw();
-        if (!pipe.passed && pipe.x + pipe.width < bird.x) {
-            score += powerUpsState.doubleScore? 2 : 1;
-            pipe.passed = true;
-            bestScore = Math.max(bestScore, score);
-            updateHud();
-            saveStoredStats();
+    try {
+        if (!running) return;
+        ctx.save();
+        if(screenShake > 0){
+            ctx.translate(
+                (Math.random() - .5) * screenShake,
+                (Math.random() - .5) * screenShake
+            );
+            screenShake *= .9;
+            if (screenShake < .15)
+                screenShake = 0;
         }
 
-        if (pipe.collidesWith(bird)) {
-            screenShake = 18;
+        if (!lastFrameTime) {
+            lastFrameTime = timestamp;
+        }
+
+        const dt = Math.min(timestamp - lastFrameTime, 32);
+        lastFrameTime = timestamp;
+        frameCount += 1;
+        updatePowerUps();
+
+        ctx.clearRect(0, 0, width, height);
+        drawBackground();
+        stars.forEach(star => star.update());
+        clouds.forEach(cloud => cloud.update(dt));
+        drawGround();
+        drawPowerUps();
+        trees.forEach(tree => tree.update(dt));
+        trees.forEach(tree => tree.draw());
+        bushes.forEach(bush => bush.update(dt));
+        bushes.forEach(bush => bush.draw());
+        drawDashTrail();
+        drawRainbowTrail();
+        bird.update(dt);
+        bird.draw();
+
+        if (frameCount - lastPipeTime > game_config.pipeSpawnRate - Math.min(score * game_config.difficultyRamp, 18)) {
+            pipes.push(new Pipe());
+            lastPipeTime = frameCount;
+        }
+
+        if (pipes.length > game_config.maxPipes) {
+            pipes.splice(0, pipes.length - game_config.maxPipes);
+        }
+        if (frameCount - lastTreeTime > game_config.treeSpawnRate - Math.min(score * game_config.difficultyRamp, 16) * 0.25) {
+            trees.push(new Tree());
+            lastTreeTime = frameCount;
+        }
+        if (frameCount - lastBushTime > game_config.treeSpawnRate + 26 - Math.min(score * game_config.difficultyRamp, 14)) {
+            bushes.push(new Bush());
+            lastBushTime = frameCount;
+        }
+        if (frameCount - lastCoinTime > game_config.coinSpawnRate) {
+            const minY = 100;
+            const maxY = height - game_config.groundHeight - 100;
+            coins.push(new Coin(width + 40, minY + Math.random() * (maxY - minY)));
+            lastCoinTime = frameCount;
+        }
+        
+        // Spawn power-ups occasionally
+        if (frameCount - lastPowerUpTime > game_config.coinSpawnRate * 2.5 && Math.random() > 0.6) {
+            const minY = 100;
+            const maxY = height - game_config.groundHeight - 100;
+            powerUps.push(new PowerUp(width + 40, minY + Math.random() * (maxY - minY)));
+            lastPowerUpTime = frameCount;
+        }
+
+        if(powerUpsState.dash) {
+            spawnDashParticle();
+        }
+
+
+        pipes.forEach(pipe => pipe.update(dt));
+        pipes = pipes.filter(pipe => pipe.x + pipe.width > -20);
+        coins.forEach(coin=> {
+            coin.update(dt);
+            if(powerUpsState.magnet){
+                const dx = bird.x - coin.x;
+                const dy = bird.y - coin.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if(dist < 170) {
+                    coin.x += dx * .08;
+                    coin.y += dy * .08;
+                }
+            }});
+        coins = coins.filter(coin => !coin.collected && coin.x + coin.size > -20);
+        bushes = bushes.filter(bush => bush.x + bush.width > -20);
+        powerUps.forEach(pu => pu.update(dt));
+        powerUps = powerUps.filter(pu => !pu.collected && pu.x + pu.size > -20);
+        particles = particles.filter(p => p.life > 0);
+        trees = trees.filter(tree => tree.x + 80 > -20);
+
+        pipes.forEach(pipe => {
+            pipe.draw();
+            if (!pipe.passed && pipe.x + pipe.width < bird.x) {
+                score += powerUpsState.doubleScore? 2 : 1;
+                pipe.passed = true;
+                bestScore = Math.max(bestScore, score);
+                updateHud();
+                saveStoredStats();
+            }
+
+            if (pipe.collidesWith(bird)) {
+                screenShake = 18;
+                hitPlayer();
+            }
+        });
+
+        bushes.forEach(bush => {
+            if (bush.collidesWith(bird)) {
+                bird.jump();
+                triggerFlash();
+                score = Math.max(0, score - 1);
+            }
+        });
+
+        coins.forEach(coin => {
+            coin.draw();
+            if (!coin.collected && coin.collidesWith(bird)) {
+                coin.collected = true;
+                coinCount += 1;
+                createCoinExplosion(coin.x, coin.y);
+                screenShake = 6;
+                updateHud();
+                saveStoredStats();
+            }
+        });
+
+        powerUps.forEach(pu => {
+            pu.draw();
+            if(!pu.collected && pu.collidesWith(bird)){
+                pu.collected = true;
+                activatePowerUp(pu.type);
+                updateHud();
+            }
+        });
+
+        particles.forEach(p => {
+            p.update();
+            p.draw();
+        });
+
+        if (bird.y + game_config.birdRadius >= height - game_config.groundHeight) {
             hitPlayer();
         }
-    });
 
-    bushes.forEach(bush => {
-        if (bush.collidesWith(bird)) {
-            bird.jump();
-            triggerFlash();
-            score = Math.max(0, score - 1);
+        if (flashTimer > 0) {
+            flashTimer -= 1;
+            if (flashTimer <= 0) {
+                hitFlash.classList.remove('active');
+            }
         }
-    });
 
-    coins.forEach(coin => {
-        coin.draw();
-        if (!coin.collected && coin.collidesWith(bird)) {
-            coin.collected = true;
-            coinCount += 1;
-            createCoinExplosion(coin.x, coin.y);
-            screenShake = 6;
-            updateHud();
-            saveStoredStats();
-        }
-    });
-
-    powerUps.forEach(pu => {
-        pu.draw();
-        if(!pu.collected && pu.collidesWith(bird)){
-            pu.collected = true;
-            activatePowerUp(pu.type);
-            updateHud();
-        }
-    });
-
-    particles.forEach(p => {
-        p.update();
-        p.draw();
-    });
-
-    if (bird.y + game_config.birdRadius >= height - game_config.groundHeight) {
-        hitPlayer();
-    }
-
-    if (flashTimer > 0) {
-        flashTimer -= 1;
-        if (flashTimer <= 0) {
-            hitFlash.classList.remove('active');
+        if (running) {
+            animationFrameId = requestAnimationFrame(gameLoop);
         }
     }
-
-    if (running) {
-        animationFrameId = requestAnimationFrame(gameLoop);
+    finally {
+        ctx.restore();
     }
-    ctx.restore();
 }
 
 function jumpAction() {
