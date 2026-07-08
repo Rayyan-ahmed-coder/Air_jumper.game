@@ -546,7 +546,7 @@ class Cloud {
 
     update(dt) {
         this.x -= this.speed * gameSpeedMultiplier * (dt / 16.67);
-        if (this.x + 20 * this.scale < -20) {
+        if (this.x + 20 * this.scale < -this.x + this.scale) {
             this.reset();
         }
     }
@@ -555,7 +555,15 @@ class Cloud {
         ctx.save();
         ctx.translate(this.x,this.y);
         ctx.scale(this.scale,this.scale);
-        ctx.fillStyle = this.g;
+        if (!this.g) {
+            const g = ctx.createRadialGradient(25, 10, 5, 25, 10, 70);
+            g.addColorStop(0,"rgba(255,255,255,.95)");
+            g.addColorStop(.65,"rgba(255,255,255,.72)");
+            g.addColorStop(1,"rgba(255,255,255,0)");
+            fillStyle = g;
+        } else {
+            ctx.fillStyle = this.g;
+        }
         ctx.beginPath();
         ctx.arc(0,8,24,0,PIE_2);
         ctx.arc(20,-6,26,0,PIE_2);
