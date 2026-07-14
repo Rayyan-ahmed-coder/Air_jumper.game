@@ -442,6 +442,105 @@ class Coin {
     }
 }
 
+class PowerUp {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.size = 18;
+        this.collected = false;
+        this.rotation = 0;
+        this.pulse = 0;
+        
+        // Configuration for colors, symbols, and distinct design rules
+        this.powerUpMeta = {
+            shield:       { color: "#ff5ca8", bg: "#4a1230", icon: "🛡️", isEmoji: true },
+            magnet:       { color: "#ff4040", bg: "#4a1010", icon: "🧲", isEmoji: true },
+            doubleScore:  { color: "#ffd93d", bg: "#4a3b0a", icon: "×2", isEmoji: false },
+            tinyBird:     { color: "#55ff99", bg: "#0f4a27", icon: "⬇", isEmoji: false },
+            slowMotion:   { color: "#5ac8ff", bg: "#0f364a", icon: "❄️", isEmoji: true },
+            dash:         { color: "#8d5cff", bg: "#250f4a", icon: "⚡", isEmoji: true },
+            phoenix:      { color: "#ff7b00", bg: "#4a220f", icon: "🔥", isEmoji: true }
+        };
+
+        const types = Object.keys(this.powerUpMeta);
+        this.type = types[Math.floor(Math.random() * types.length)];
+    }
+
+    update(dt) {
+        const speed = (game_config.pipeSpeed + Math.min(score * game_config.difficultyRamp, 1.2) * 0.5) * gameSpeedMultiplier;
+        this.x -= speed * (dt / 16.67);
+        
+        // Time-independent smooth rotations and floating animations
+        const timeFactor = dt / 16.67;
+        this.rotation += 0.04 * timeFactor;
+        this.pulse += 0.1 * timeFactor;
+    }
+
+    draw() {
+        if (this.collected) return;
+
+        const meta = this.powerUpMeta[this.type];
+        const pulseScale = 1 + Math.sin(this.pulse) * 0.08;
+        
+        ctx.save();
+        ctx.translate(this.x, this.y);
+
+        // --- LAYER 1: Core Ambient Background Glow ---
+        ctx.shadowColor = meta.color;
+        ctx.shadowBlur = 25 + Math.sin(this.pulse) * 10;
+        
+        // --- LAYER 2: Outer Techno Ring (Rotates) ---
+        ctx.save();
+        ctx.rotate(this.rotation);
+        ctx.strokeStyle = meta.color;
+        ctx.lineWidth = 3;
+        ctx.setLineDash([8, 8]); // Dashed sci-fi ring effect
+        ctx.beginPath();
+        ctx.arc(0, 0, this.size * pulseScale * 1.2, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+
+        // --- LAYER 3: Dark Inner Core Orb ---
+        ctx.shadowBlur = 0; // Clear shadow to keep the inner core sharp
+        ctx.fillStyle = meta.bg;
+        ctx.strokeStyle = meta.color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, this.size * pulseScale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // --- LAYER 4: Glowing Foreground Icon ---
+        ctx.save();
+        // Emojis shouldn't spin or they look messy; text like "×2" stays upright
+        if (!meta.isEmoji) {
+            ctx.rotate(this.rotation * -0.5); // Slow counter-rotation for text
+        }
+        
+        // Subtle icon pop glow
+        ctx.shadowColor = meta.color;
+        ctx.shadowBlur = 10;
+        ctx.fillStyle = meta.isEmoji ? "#ffffff" : meta.color;
+        ctx.font = "bold 16px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        
+        // Offset adjustment: clean up vertical text alignment differences
+        const yOffset = meta.isEmoji ? 0 : 1; 
+        ctx.fillText(meta.icon, 0, yOffset);
+        ctx.restore();
+
+        ctx.restore();
+    }
+
+    collidesWith(bird) {
+        const dx = bird.x - this.x;
+        const dy = bird.y - this.y;
+        const targetDist = game_config.birdRadius + (this.size * 1.2); // Generous hitbox for outer ring
+        return (dx * dx + dy * dy) < (targetDist * targetDist);
+    }
+}
+
 class Tree {
     constructor() {
         this.scale = 0.7 + Math.random() * 0.7;
@@ -553,74 +652,6 @@ class Bush {
     }
 }
 
-class PowerUp {
-    constructor(x, y) {
-        this.x = x;
-        this.y = y;
-        this.size = 18;
-        this.collected = false;
-        this.rotation = 0;
-        const types = [
-            "shield",
-            "magnet",
-            "doubleScore",
-            "tinyBird",
-            "slowMotion",
-            "dash",
-            "phoenix"
-        ];
-        this.type = types[Math.floor(Math.random() * types.length)];
-    }
-
-    update(dt) {
-        this.x -= (game_config.pipeSpeed + Math.min(score * game_config.difficultyRamp, 1.2) * 0.5) * gameSpeedMultiplier * (dt / 16.67);
-        this.rotation += 0.08;
-    }
-
-    draw() {
-        ctx.save();
-        ctx.translate(this.x,this.y);
-        ctx.rotate(this.rotation);
-        const colors = {
-            shield:"#ff5ca8",
-            magnet:"#ff4040",
-            doubleScore:"#ffd93d",
-            tinyBird:"#55ff99",
-            slowMotion:"#5ac8ff",
-            dash:"#8d5cff",
-            phoenix:"#ff7b00"
-        };
-        ctx.shadowColor = colors[this.type];
-        ctx.shadowBlur = 20 + Math.sin(frameCount * .2) * 10;
-        ctx.fillStyle = colors[this.type];
-        ctx.beginPath();
-        ctx.arc(0,0,this.size,0,Math.PI*2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.fillStyle="white";
-        ctx.font="bold 18px Arial";
-        ctx.textAlign="center";
-        ctx.textBaseline="middle";
-        const icons = {
-            shield:"🛡",
-            magnet:"🧲",
-            doubleScore:"×2",
-            tinyBird:"⬇",
-            slowMotion:"❄",
-            dash:"⚡",
-            phoenix:"🔥"
-        };
-        ctx.fillText(icons[this.type],0,1);
-        ctx.restore();
-    }
-
-    collidesWith(bird) {
-        const dx = bird.x - this.x;
-        const dy = bird.y - this.y;
-        return dx*dx+dy*dy < (game_config.birdRadius + this.size) * (game_config.birdRadius + this.size);
-    }
-}
-
 class Cloud {
     constructor() {
         this.reset();
@@ -631,11 +662,11 @@ class Cloud {
         this.x = canvasWidth + Math.random() * 300;
         this.y = 30 + Math.random() * (canvasHeight * 0.3);
         this.scale = 0.85 + Math.random() * 0.7;
-        this.speed = 0.15 + Math.random() * 0.4;
+        this.speed = 0.5 + Math.random() * 0.4;
     }
 
     update(dt) {
-        this.x -= this.speed * gameSpeedMultiplier * (dt / 16.67);
+        this.x -= (this.speed * gameSpeedMultiplier * (dt / 16.67)) + this.scale;
         if (this.x + 200 * this.scale < 0) {
             this.reset();
         }
@@ -646,9 +677,9 @@ class Cloud {
         ctx.translate(this.x,this.y);
         ctx.scale(this.scale,this.scale);
         const g = ctx.createRadialGradient(25, 10, 5, 25, 10, 70);
-        g.addColorStop(0, lerpColor('rgb(255,255,255)', 'rgb(134, 134, 189)' , 0.95, skyBrightness, 'oklab'));
-        g.addColorStop(.5, lerpColor('rgb(255,255,255)', 'rgb(130, 126, 196)', 0.72, skyBrightness, 'oklch'));
-        g.addColorStop(1, lerpColor('rgb(255, 255, 255)', 'rgb(134, 162, 197)',  0.18, skyBrightness, 'hwb'));
+        g.addColorStop(0, lerpColor('rgb(255,255,255)', 'rgb(134, 134, 189)' , 0.95, skyBrightness, 'oklch'));
+        g.addColorStop(.5, lerpColor('rgb(255,255,255)', 'rgb(159, 157, 207)', 0.72, skyBrightness, 'oklch'));
+        g.addColorStop(1, lerpColor('rgb(255, 255, 255)', 'rgb(134, 162, 197)',  0.18, skyBrightness, 'oklab'));
         ctx.fillStyle = g;
         ctx.beginPath();
         ctx.arc(0,8,24,0,PIE_2);
@@ -848,7 +879,7 @@ class DrawGame {
         
         // Atmospheric Waves
         for (let i = 0; i < 5; i++) {
-            const alpha = 0.09 + i / 100;
+            const alpha = 0.1 + i / 100;
             ctx.fillStyle = `rgba(78, 137, 165, ${String(alpha)})`;
             const y = 120 + i * 75 + Math.sin(frameCount * .007 + i) * 10;
             ctx.beginPath();
@@ -1050,13 +1081,13 @@ function drawFloatingIsland(x, y, scale) {
 
 function drawGround(){
     const g = ctx.createLinearGradient(0, canvasHeight-game_config.groundHeight, 0, canvasHeight);
-    g.addColorStop(0, "#69d63d");
-    g.addColorStop(.5, "#46b02d");
-    g.addColorStop(1, "#2d7e21");
+    g.addColorStop(0, lerpColor("#69d63d", "rgb(73, 175, 104)", 1, skyBrightness, 'oklch'));
+    g.addColorStop(.5, lerpColor("#46b02d", 'rgb(54, 155, 108)', 1, skyBrightness, 'oklch'));
+    g.addColorStop(1, lerpColor("#2d7e21", 'rgb(33, 117, 78)', 1, skyBrightness, 'oklch'));
     ctx.fillStyle = g;
     ctx.fillRect(0, canvasHeight - game_config.groundHeight, canvasWidth, game_config.groundHeight);
     // grass
-    ctx.fillStyle="#8cff61";
+    ctx.fillStyle = lerpColor("#8cff61", 'rgb(98, 204, 124)', 1, skyBrightness, 'oklab');
     ctx.fillRect(0, canvasHeight - game_config.groundHeight, canvasWidth, 6);
     // dirt dots
     for(let i = 0; i < canvasWidth; i += 20){
@@ -1085,217 +1116,167 @@ function updateHud() {
     }
 }
 
-function lerpColor(color1, color2, alpha, t, colorType = 'rgba') {
-    const clampedT = Math.max(0, Math.min(1, t));
-    const forcedAlpha = Math.max(0, Math.min(1, alpha));
+function lerpColor(color1, color2, alphaModifier, t, colorType = 'rgba') {
+    const clampedT = t < 0 ? 0 : (t > 1 ? 1 : t);
     const targetSpace = colorType.toLowerCase();
-    const outAlphaStr = forcedAlpha.toFixed(2);
 
-    // --- W3C MATRIX CONSTANTS (D65 ILLUMINANT) ---
-    const M_XYZ_TO_SRGB = [
-        [ 3.2404542, -1.5371385, -0.4985314],
-        [-0.9692660,  1.8760108,  0.0415560],
-        [ 0.0556434, -0.2040259,  1.0572252]
-    ];
-
-    // --- 1. FULL SPEC CSS RELATIVE & ABSOLUTE PARSER ---
-    const parseColor = (colorStr) => {
-        if (!colorStr) return { r: 0, g: 0, b: 0, a: 1 };
-        let cleaned = colorStr.trim().toLowerCase().replace(/\s+/g, ' ');
-
-        // Handle CSS Relative Color Syntax "from [base] channel1 channel2..."
-        if (cleaned.includes('from ')) {
-            const match = cleaned.match(/(rgba?|oklab|oklch|lab)\(from ([^)]+)\s+([^)]+)\)/);
-            if (match) {
-                const [,, baseColor, channelsStr] = match;
-                const base = parseColor(baseColor);
-                const channels = channelsStr.split(' ');
-                
-                // Fallback evaluation replacing relative tokens with actual values
-                let r = base.r, g = base.g, b = base.b, a = base.a;
-                if (channels[0] && !isNaN(parseFloat(channels[0]))) r = parseFloat(channels[0]);
-                if (channels[1] && !isNaN(parseFloat(channels[1]))) g = parseFloat(channels[1]);
-                if (channels[2] && !isNaN(parseFloat(channels[2]))) b = parseFloat(channels[2]);
-                if (channels[4] && !isNaN(parseFloat(channels[4]))) a = parseFloat(channels[4]); // Account for '/' delimiter
-                return { r, g, b, a };
-            }
-        }
-
-        if (cleaned.startsWith('rgb')) {
-            const matches = cleaned.match(/[\d.]+/g) || ['0', '0', '0', '1'];
-            return {
-                r: parseInt(matches[0], 10) || 0,
-                g: parseInt(matches[1], 10) || 0,
-                b: parseInt(matches[2], 10) || 0,
-                a: matches[3] !== undefined ? parseFloat(matches[3]) : 1
-            };
-        }
-
-        if (cleaned.startsWith('#')) cleaned = cleaned.slice(1);
-        if (cleaned.length === 3 || cleaned.length === 4) {
-            cleaned = cleaned.split('').map(c => c + c).join('');
-        }
-
-        if (cleaned.length === 6 || cleaned.length === 8) {
-            return {
-                r: parseInt(cleaned.slice(0, 2), 16),
-                g: parseInt(cleaned.slice(2, 4), 16),
-                b: parseInt(cleaned.slice(4, 6), 16),
-                a: cleaned.length === 8 ? Math.round((parseInt(cleaned.slice(6, 8), 16) / 255) * 100) / 100 : 1
-            };
-        }
-
-        // Hardcoded standard keyword fallbacks
-        const namedColors = { red: {r:255,g:0,b:0,a:1}, blue: {r:0,g:0,b:255,a:1}, white: {r:255,g:255,b:255,a:1}, black: {r:0,g:0,b:0,a:1} };
-        return namedColors[cleaned] || { r: 0, g: 0, b: 0, a: 1 };
-    };
-
-    // --- 2. ACCURATE MATH ENGINE ---
-    const lerpChannel = (c1, a1, c2, a2, amt, targetAlpha) => {
-        if (targetAlpha === 0) return 0;
-        return ((c1 * a1) + ((c2 * a2) - (c1 * a1)) * amt) / targetAlpha;
-    };
-
-    const lerpRaw = (start, end, amt) => start + (end - start) * amt;
-
-    const sRgbToOklab = ({ r, g, b }) => {
-        let R = r / 255, G = g / 255, B = b / 255;
-        R = R > 0.04045 ? Math.pow((R + 0.055) / 1.055, 2.4) : R / 12.92;
-        G = G > 0.04045 ? Math.pow((G + 0.055) / 1.055, 2.4) : G / 12.92;
-        B = B > 0.04045 ? Math.pow((B + 0.055) / 1.055, 2.4) : B / 12.92;
-
-        const l = 0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B;
-        const m = 0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B;
-        const s = 0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B;
-
-        const l_ = Math.cbrt(l), m_ = Math.cbrt(m), s_ = Math.cbrt(s);
-        return {
-            L: 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
-            a: 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
-            b: 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
-        };
-    };
-
-    const sRgbToLab = ({ r, g, b }) => {
-        let R = r / 255, G = g / 255, B = b / 255;
-        R = R > 0.04045 ? Math.pow((R + 0.055) / 1.055, 2.4) : R / 12.92;
-        G = G > 0.04045 ? Math.pow((G + 0.055) / 1.055, 2.4) : G / 12.92;
-        B = B > 0.04045 ? Math.pow((B + 0.055) / 1.055, 2.4) : B / 12.92;
-
-        const x = (R * 0.4124564 + G * 0.3575761 + B * 0.1804375) / 0.95047;
-        const y = (R * 0.2126729 + G * 0.7151522 + B * 0.0721750) / 1.00000;
-        const z = (R * 0.0193339 + G * 0.1191920 + B * 0.9503041) / 1.08883;
-
-        const fx = x > 0.008856 ? Math.cbrt(x) : (7.787 * x) + 16/116;
-        const fy = y > 0.008856 ? Math.cbrt(y) : (7.787 * y) + 16/116;
-        const fz = z > 0.008856 ? Math.cbrt(z) : (7.787 * z) + 16/116;
-        return { L: (116 * fy) - 16, a: 500 * (fx - fy), b: 200 * (fy - fz) };
-    };
-
-    // --- 3. W3C SPEC GAMUT CLIPPING (Oklab -> Linear -> sRGB) ---
+    // Fast inline conversion: Oklab -> Bounded sRGB Gamut Mapper
     const oklabToSrgb = (L, a, b) => {
-        const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
-        const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
-        const s_ = L - 0.0894841775 * a - 1.2914855414 * b;
-
-        const l = l_ * l_ * l_, m = m_ * m_ * m_, s = s_ * s_ * s_;
-
-        let R = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
-        let G = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
-        let B = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
-
-        R = R > 0.0031308 ? 1.055 * Math.pow(R, 1 / 2.4) - 0.055 : 12.92 * R;
-        G = G > 0.0031308 ? 1.055 * Math.pow(G, 1 / 2.4) - 0.055 : 12.92 * G;
-        B = B > 0.0031308 ? 1.055 * Math.pow(B, 1 / 2.4) - 0.055 : 12.92 * B;
-
-        // Strict clipping bounded bounds protection
-        return {
-            r: Math.max(0, Math.min(255, Math.round(R * 255))),
-            g: Math.max(0, Math.min(255, Math.round(G * 255))),
-            b: Math.max(0, Math.min(255, Math.round(B * 255)))
-        };
+        const l = Math.pow(L + 0.3963377774 * a + 0.2158037573 * b, 3);
+        const m = Math.pow(L - 0.1055613458 * a - 0.0638541728 * b, 3);
+        const s = Math.pow(L - 0.0894841775 * a - 1.2914855414 * b, 3);
+        const R = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+        const G = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+        const B = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
+        const clmp = v => Math.max(0, Math.min(255, Math.round((v > 0.0031308 ? 1.055 * Math.pow(v, 0.4166666) - 0.055 : 12.92 * v) * 255)));
+        return [clmp(R), clmp(G), clmp(B)];
     };
 
-    const c1 = parseColor(color1);
-    const c2 = parseColor(color2);
-
-    // --- 4. PROBING NATIVE SPACE INTERPOLATION ---
-    switch (targetSpace) {
-        case 'oklab': {
-            const p1 = sRgbToOklab(c1);
-            const p2 = sRgbToOklab(c2);
-            const L = lerpChannel(p1.L, c1.a, p2.L, c2.a, clampedT, forcedAlpha);
-            const a = lerpChannel(p1.a, c1.a, p2.a, c2.a, clampedT, forcedAlpha);
-            const b = lerpChannel(p1.b, c1.a, p2.b, c2.a, clampedT, forcedAlpha);
-            return `oklab(${L.toFixed(4)} ${a.toFixed(4)} ${b.toFixed(4)} / ${outAlphaStr})`;
+    // --- 1. HIGH-SPEED EXTRACTION ENGINE (FIXED) ---
+    const parseColorFlat = (str) => {
+        if (!str) return [0, 0, 0, 1];
+        let s = str.trim().toLowerCase();
+        
+        // CSS Variable Fallback Engine
+        if (s.charCodeAt(0) === 118) { // starts with 'v' for var(
+            const idx = s.indexOf(',');
+            s = idx !== -1 ? s.slice(idx + 1, s.lastIndexOf(')')).trim() : 'black';
         }
+        
+        // FIX: Swapped string sanitization ordering to guarantee single spaces and eliminate empty string tokens
+        s = s.replace(/color\s+display-p3/g, 'display-p3')
+             .replace(/[\/\(\),]/g, ' ')
+             .replace(/\s+/g, ' ');
+             
+        const tk = s.split(' ').filter(Boolean);
+        if (tk.length === 0) return [0, 0, 0, 1];
 
-        case 'oklch': {
-            const p1 = sRgbToOklab(c1);
-            const p2 = sRgbToOklab(c2);
-            
-            const c1_C = Math.hypot(p1.a, p1.b);
-            const c2_C = Math.hypot(p2.a, p2.b);
-            let h1 = Math.atan2(p1.b, p1.a) * (180 / Math.PI);
-            let h2 = Math.atan2(p2.b, p2.a) * (180 / Math.PI);
-            if (h1 < 0) h1 += 360;
-            if (h2 < 0) h2 += 360;
+        const space = tk[0];
+        const val = (idx, max = 1) => {
+            const token = tk[idx];
+            if (!token) return 0;
+            if (token.endsWith('%')) return (parseFloat(token) / 100) * max;
+            return parseFloat(token);
+        };
 
-            if (Math.abs(h2 - h1) > 180) {
-                if (h2 > h1) h1 += 360;
-                else h2 += 360;
+        if (['oklch', 'oklab', 'lab', 'display-p3'].includes(space)) {
+            const L = val(1, space === 'lab' ? 100 : 1);
+            const c2 = val(2, space === 'lab' ? 125 : 1);
+            const c3 = val(3, space === 'lab' ? 125 : space === 'oklch' ? 360 : 1);
+            const a  = tk[4] !== undefined ? val(4, 1) : 1;
+
+            if (space === 'display-p3') {
+                const R = L * 1.2249401 - c2 * 0.2247164 - c3 * 0.0002237;
+                const G = -L * 0.0753066 + c2 * 1.0753066 - c3 * 0.0000000;
+                const B = -L * 0.0197415 - c2 * 0.0786358 + c3 * 1.0983773;
+                const clmp = v => Math.max(0, Math.min(255, Math.round(v * 255)));
+                return [clmp(R), clmp(G), clmp(B), a];
             }
 
-            const L = lerpChannel(p1.L, c1.a, p2.L, c2.a, clampedT, forcedAlpha);
-            const C = lerpChannel(c1_C, c1.a, c2_C, c2.a, clampedT, forcedAlpha);
-            const h = (lerpRaw(h1, h2, clampedT) % 360 + 360) % 360;
-            return `oklch(${L.toFixed(4)} ${C.toFixed(4)} ${h.toFixed(2)} / ${outAlphaStr})`;
-        }
-
-        case 'lab': {
-            const p1 = sRgbToLab(c1);
-            const p2 = sRgbToLab(c2);
-            const L = lerpChannel(p1.L, c1.a, p2.L, c2.a, clampedT, forcedAlpha);
-            const a = lerpChannel(p1.a, c1.a, p2.a, c2.a, clampedT, forcedAlpha);
-            const b = lerpChannel(p1.b, c1.a, p2.b, c2.a, clampedT, forcedAlpha);
-            return `lab(${L.toFixed(2)} ${a.toFixed(2)} ${b.toFixed(2)} / ${outAlphaStr})`;
-        }
-
-        case 'hwb': {
-            const p1 = sRgbToOklab(c1);
-            const p2 = sRgbToOklab(c2);
-            const L = lerpChannel(p1.L, c1.a, p2.L, c2.a, clampedT, forcedAlpha);
-            const a = lerpChannel(p1.a, c1.a, p2.a, c2.a, clampedT, forcedAlpha);
-            const b = lerpChannel(p1.b, c1.a, p2.b, c2.a, clampedT, forcedAlpha);
-            
-            // Back-convert to bounded sRGB via structural clipping
-            const clipped = oklabToSrgb(L, a, b);
-            const rN = clipped.r / 255, gN = clipped.g / 255, bN = clipped.b / 255;
-            const max = Math.max(rN, gN, bN), min = Math.min(rN, gN, bN);
-            
-            let h = 0;
-            if (max !== min) {
-                if (max === rN) h = (gN - bN) / (max - min);
-                else if (max === gN) h = 2.0 + (bN - rN) / (max - min);
-                else h = 4.0 + (rN - gN) / (max - min);
+            if (space === 'oklch') {
+                const rad = c3 * 0.01745329251; // Math.PI / 180
+                return [...oklabToSrgb(L, c2 * Math.cos(rad), c2 * Math.sin(rad)), a];
             }
-            h = Math.round(h * 60);
-            if (h < 0) h += 360;
-            return `hwb(${h} ${Math.round(min * 100)}% ${Math.round((1.0 - max) * 100)}% / ${outAlphaStr})`;
+            if (space === 'oklab') return [...oklabToSrgb(L, c2, c3), a];
+            
+            // FIX: Remapped CIE Lab to convert down into native, separate matrix channels safely
+            const fy = (L + 16) / 116, fx = c2 / 500 + fy, fz = fy - c3 / 200;
+            const fI = v => v * v * v > 0.008856 ? v * v * v : (v - 16 / 116) / 7.787;
+            const X = fI(fx) * 0.95047, Y = fI(fy), Z = fI(fz) * 1.08883;
+            const R = X * 3.2404542 - Y * 1.5371385 - Z * 0.4985314;
+            const G = -X * 0.9692660 + Y * 1.8760108 + Z * 0.0415560;
+            const B = X * 0.0556434 - Y * 0.2040259 + Z * 1.0572252;
+            const clmp = v => Math.max(0, Math.min(255, Math.round((v > 0.0031308 ? 1.055 * Math.pow(v, 1 / 2.4) - 0.055 : 12.92 * v) * 255)));
+            return [clmp(R), clmp(G), clmp(B), a];
         }
 
-        default: { // rgb / rgba
-            const p1 = sRgbToOklab(c1);
-            const p2 = sRgbToOklab(c2);
-            const L = lerpChannel(p1.L, c1.a, p2.L, c2.a, clampedT, forcedAlpha);
-            const a = lerpChannel(p1.a, c1.a, p2.a, c2.a, clampedT, forcedAlpha);
-            const b = lerpChannel(p1.b, c1.a, p2.b, c2.a, clampedT, forcedAlpha);
-            
-            const clipped = oklabToSrgb(L, a, b);
-            return `rgba(${clipped.r}, ${clipped.g}, ${clipped.b}, ${outAlphaStr})`;
+        // FIX: Fixed token indexing array assignments for functional color inputs
+        if (space.startsWith('rgb')) {
+            return [
+                Math.max(0, Math.min(255, Math.round(tk[1].endsWith('%') ? parseFloat(tk[1]) * 2.55 : parseFloat(tk[1])))),
+                Math.max(0, Math.min(255, Math.round(tk[2].endsWith('%') ? parseFloat(tk[2]) * 2.55 : parseFloat(tk[2])))),
+                Math.max(0, Math.min(255, Math.round(tk[3].endsWith('%') ? parseFloat(tk[3]) * 2.55 : parseFloat(tk[3])))),
+                tk[4] !== undefined ? (tk[4].endsWith('%') ? parseFloat(tk[4]) * 0.01 : parseFloat(tk[4])) : 1
+            ];
         }
+
+        let hex = space;
+        if (hex.charCodeAt(0) === 35) hex = hex.slice(1);
+        if (hex.length === 3 || hex.length === 4) hex = hex.split('').map(c => c + c).join('');
+        if (hex.length === 6 || hex.length === 8) {
+            return [
+                parseInt(hex.slice(0, 2), 16) || 0, parseInt(hex.slice(2, 4), 16) || 0, parseInt(hex.slice(4, 6), 16) || 0,
+                hex.length === 8 ? Math.round((parseInt(hex.slice(6, 8), 16) / 255) * 100) * 0.01 : 1
+            ];
+        }
+
+        // FIX: Repaired dictionary formatting structure syntax errors
+        const keywords = { 
+            transparent: [0,0,0,0], red: [255,0,0,1], blue: [0,0,255,1], 
+            white: [255,255,255,1], black: [0,0,0,1], gray: [128,128,128,1],
+            silver: [192,192,192,1], gold: [255,215,0,1]
+        };
+        return keywords[hex] || [0, 0, 0, 1];
+    };
+
+    const c1 = parseColorFlat(color1), c2 = parseColorFlat(color2);
+
+    // Alpha channel computation
+    const mod = typeof alphaModifier === 'string' && alphaModifier.endsWith('%') ? parseFloat(alphaModifier) * 0.01 : parseFloat(alphaModifier);
+    const finalAlpha = (c1[3] + (c2[3] - c1[3]) * clampedT) * mod;
+    const aStr = (finalAlpha < 0 ? 0 : finalAlpha > 1 ? 1 : finalAlpha).toFixed(2);
+
+    // Transform sRGB parameters into Oklab vector fields for uniform gradients
+    const sRgbToOklabFlat = (c) => {
+        const trans = v => v / 255 > 0.04045 ? Math.pow((v / 255 + 0.055) / 1.055, 2.4) : (v / 255) / 12.92;
+        const R = trans(c[0]), G = trans(c[1]), B = trans(c[2]);
+        const l = Math.cbrt(0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B);
+        const m = Math.cbrt(0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B);
+        const s = Math.cbrt(0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B);
+        return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s];
+    };
+
+    const p1 = sRgbToOklabFlat(c1), p2 = sRgbToOklabFlat(c2);
+    const L = p1[0] + (p2[0] - p1[0]) * clampedT;
+    const a = p1[1] + (p2[1] - p1[1]) * clampedT;
+    const b = p1[2] + (p2[2] - p1[2]) * clampedT;
+
+    const sOut = oklabToSrgb(L, a, b);
+    const outR = sOut[0], outG = sOut[1], outB = sOut[2];
+
+    // --- OUTPUT HUB ---
+    if (targetSpace === 'oklab') return `oklab(${L.toFixed(4)} ${a.toFixed(4)} ${b.toFixed(4)} / ${aStr})`;
+    if (targetSpace === 'oklch') {
+        let h1 = Math.atan2(p1[2], p1[1]) * 57.295779513, h2 = Math.atan2(p2[2], p2[1]) * 57.295779513;
+        h1 = h1 < 0 ? h1 + 360 : h1; h2 = h2 < 0 ? h2 + 360 : h2;
+        if (Math.abs(h2 - h1) > 180) h2 > h1 ? h1 += 360 : h2 += 360;
+        const h = ((h1 + (h2 - h1) * clampedT) % 360 + 360) % 360;
+        const c1_C = Math.hypot(p1[1], p1[2]), c2_C = Math.hypot(p2[1], p2[2]);
+        return `oklch(${L.toFixed(4)} ${(c1_C + (c2_C - c1_C) * clampedT).toFixed(4)} ${h.toFixed(2)} / ${aStr})`;
     }
+    if (targetSpace === 'lab') {
+        const trans = v => v / 255 > 0.04045 ? Math.pow((v / 255 + 0.055) / 1.055, 2.4) : (v / 255) / 12.92;
+        const X = (trans(outR) * 0.4124564 + trans(outG) * 0.3575761 + trans(outB) * 0.1804375) / 0.95047;
+        const Y = trans(outR) * 0.2126729 + trans(outG) * 0.7151522 + trans(outB) * 0.0721750;
+        const Z = (trans(outR) * 0.0193339 + trans(outG) * 0.1191920 + trans(outB) * 0.9503041) / 1.08883;
+        const f = v => v > 0.008856 ? Math.cbrt(v) : (7.787 * v) + 0.137931;
+        return `lab(${(116 * f(Y) - 16).toFixed(2)} ${(500 * (f(X) - f(Y))).toFixed(2)} ${(200 * (f(Y) - f(Z))).toFixed(2)} / ${aStr})`;
+    }
+    if (targetSpace === 'hwb' || targetSpace === 'hsl' || targetSpace === 'hsla') {
+        const rN = outR / 255, gN = outG / 255, bN = outB / 255, max = Math.max(rN, gN, bN), min = Math.min(rN, gN, bN);
+        let h = max === min ? 0 : max === rN ? (gN - bN) / (max - min) : max === gN ? 2 + (bN - rN) / (max - min) : 4 + (rN - gN) / (max - min);
+        h = Math.round(h * 60); h = h < 0 ? h + 360 : h;
+        if (targetSpace === 'hwb') return `hwb(${h} ${Math.round(min * 100)}% ${Math.round((1 - max) * 100)}% / ${aStr})`;
+        let l = (max + min) * 0.5, sat = max === min ? 0 : (l > 0.5 ? (max - min) / (2 - max - min) : (max - min) / (max + min));
+        return `hsla(${h % 360}, ${Math.round(sat * 100)}%, ${Math.round(l * 100)}%, ${aStr})`;
+    }
+    if (targetSpace === 'hex' || targetSpace === 'hexa') {
+        const fH = v => v.toString(16).padStart(2, '0');
+        return `#${fH(outR)}${fH(outG)}${fH(outB)}${finalAlpha >= 0.99 ? '' : fH(Math.max(0, Math.min(255, Math.round(finalAlpha * 255))))}`;
+    }
+    return `rgba(${outR}, ${outG}, ${outB}, ${aStr})`;
 }
+
 
 
 function drawDashTrail() {
