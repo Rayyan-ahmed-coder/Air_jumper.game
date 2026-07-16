@@ -28,35 +28,22 @@ const game_config = {
 };
 
 const PIE_2 = Math.PI * 2;
-const BASE_WIDTH = 820;
-const BASE_HEIGHT = 620;
+const BASE_WIDTH = 820, BASE_HEIGHT = 620;
 const STORAGE_KEY = 'air-jumper-stats';
 
-let canvasWidth = BASE_WIDTH;
-let canvasHeight = BASE_HEIGHT;
+let canvasWidth = BASE_WIDTH, canvasHeight = BASE_HEIGHT;
 let devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
 
 let bird;
 
-let pipes;
-let clouds;
-let stars;
-let trees;
-let bushes;
-let coins;
-let particles;
-let powerUps;
+let pipes, clouds, stars, trees, bushes, coins, particles, powerUps;
 
 let frameCount;
 let score;
 let coinCount = 0;
 let bestScore = 0;
 
-let lastPipeTime = 0;
-let lastCoinTime = 0;
-let lastTreeTime = 0;
-let lastBushTime = 0;
-let lastPowerUpTime = 0;
+let lastPipeTime = 0, lastCoinTime = 0, lastTreeTime = 0, lastBushTime = 0, lastPowerUpTime = 0;
 
 let flashTimer = 0;
 let lastFrameTime = 0;
@@ -1096,10 +1083,10 @@ class Cloud {
         g.addColorStop(1, lerpColor('rgb(255, 255, 255)', 'rgb(134, 162, 197)',  0.18, skyBrightness, 'oklab'));
         ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(1,6,26,0,PIE_2);
-        ctx.arc(20,-6,28,0,PIE_2);
-        ctx.arc(46,-4,26,0,PIE_2);
-        ctx.arc(70,8,28,0,PIE_2);
+        ctx.arc(-2,5,26,0,PIE_2);
+        ctx.arc(19,-5,28,0,PIE_2);
+        ctx.arc(49,-3,26,0,PIE_2);
+        ctx.arc(73,7,28,0,PIE_2);
         ctx.arc(35,18,30,0,PIE_2);
         ctx.fill();
         ctx.restore();
@@ -1254,9 +1241,7 @@ function drawPowerUpMeters() {
         const fillW = s.isBar ? w * (time / s.max) : 0;
         const flashCondition = isLow && (Math.floor(frameCount / 4) % 2 === 0);
 
-        // ----------------------------------------------------
         // STYLE METHOD A: TIMED PROGRESS BAR LAYOUT (`isBar === true`)
-        // ----------------------------------------------------
         if (s.isBar) {
             if (time <= 0) return; // Hide bars if out of time frames
             const secStr = `${(time / 60).toFixed(1)}s`;
@@ -1269,7 +1254,8 @@ function drawPowerUpMeters() {
 
             // Label Text
             ctx.fillStyle = "#ffffff";
-            ctx.font = "bold 13px 'Impact', 'Arial Black', sans-serif";
+            ctx.font = "500 17px 'Impact', 'Arial Black', sans-serif";
+            ctx.letterSpacing = "2px";
             ctx.fillText(s.txt, pad + 28, y - 6);
 
             // Timer Clock Text
@@ -1346,8 +1332,9 @@ function drawPowerUpMeters() {
             ctx.fillText(s.ico, pad + (badgeSize / 2) + 12, y + (badgeSize / 2) - 10);
 
             // Data descriptor tracking string text sat directly next to it
-            ctx.fillStyle = "#ffffff";
-            ctx.font = "bold 12px 'Impact', sans-serif";
+            ctx.fillStyle = `rgb(195, 232, 241)`;
+            ctx.font = "500 17px 'Impact', 'Arial Black', sans-serif";
+            ctx.letterSpacing = "2px";
             ctx.textAlign = "left";
             ctx.textBaseline = "middle";
             ctx.fillText(s.txt, pad + badgeSize + 28, y + (badgeSize / 2) - 12);
@@ -1548,19 +1535,87 @@ class DrawGame {
         // Clean up canvas states safely
         ctx.shadowBlur = 0;
     }
+}
 
-    drawMountainLayer(color, y, peakHeight, widthSize, offset) {
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.moveTo(-widthSize + offset, canvasHeight);
-        for (let x = -widthSize; x < canvasWidth + widthSize * 2; x += widthSize) {
-            ctx.lineTo(x + offset, canvasHeight - y);
-            ctx.lineTo(x + widthSize * 0.5 + offset, canvasHeight - y - peakHeight);
-            ctx.lineTo(x + widthSize + offset, canvasHeight - y);
+class Mountain {
+    constructor(baseY, height, peakColor, shadowColor, layers = 7) {
+        this.baseY = baseY;           // The bottom anchor line of the mountain
+        this.height = height;         // Maximum peak height factor
+        this.peakColor = peakColor;   // Highlight sunset orange/pink color
+        this.shadowColor = shadowColor; // Deep blue valley shadow color
+        this.points = [];             // 🚀 STATIC POSITION CACHE: Calculated once, stays fixed!
+
+        this.generateShape(layers);
+    }
+
+    // 🚀 Midpoint Displacement Algorithm (Creates beautiful, natural jagged mountain peaks)
+    generateShape(layers) {
+        let segments = Math.pow(2, layers);
+        this.points = new Array(segments + 1);
+        
+        // Lock absolute boundaries
+        this.points[0] = this.baseY - (Math.random() * this.height * 0.3);
+        this.points[segments] = this.baseY - (Math.random() * this.height * 0.3);
+        
+        let roughness = 0.45; // Controls how sharp or smooth the mountain peaks look
+        let displacement = this.height;
+
+        // Recursive generation loop
+        for (let i = 1; i <= layers; i++) {
+            let stride = segments / Math.pow(2, i);
+            let mid = stride;
+
+            while (mid < segments) {
+                let left = mid - stride;
+                let right = mid + stride;
+                
+                // Displace midpoint position smoothly
+                this.points[mid] = (this.points[left] + this.points[right]) / 2 + (Math.random() - 0.5) * displacement;
+                
+                mid += stride * 2;
+            }
+            displacement *= roughness;
         }
-        ctx.lineTo(canvasWidth + widthSize, canvasHeight);
+    }
+
+    draw() {
+        if (this.points.length === 0) return;
+
+        ctx.save();
+        
+        // 1. SETUP MOUNTAIN SUNSET GRADIENT (Matches the warm light shifting to deep blue shadows)
+        const mountainGrad = ctx.createLinearGradient(0, this.baseY - this.height, 0, this.baseY);
+        mountainGrad.addColorStop(0, this.peakColor);   // Glowing pinkish-orange top
+        mountainGrad.addColorStop(0.4, this.peakColor);
+        mountainGrad.addColorStop(1, this.shadowColor); // Dark blue vector valley bottom
+        
+        ctx.fillStyle = mountainGrad;
+
+        // 2. MAP FIXED POINTS ARRAY TO CANVAS PATH
+        ctx.beginPath();
+        const segmentWidth = canvasWidth / (this.points.length - 1);
+        
+        // Start bottom-left corner of screen bounds
+        ctx.moveTo(0, canvasHeight); 
+        ctx.lineTo(0, this.points[0]);
+
+        for (let i = 1; i < this.points.length; i++) {
+            ctx.lineTo(i * segmentWidth, this.points[i]);
+        }
+
+        // Close path down right boundary wall back to bottom left
+        ctx.lineTo(canvasWidth, canvasHeight);
         ctx.closePath();
         ctx.fill();
+
+        ctx.restore();
+    }
+
+    // Parallax Scrolling Effect Handler
+    update(dt) {
+        // Optional: If you want background mountains to scroll slowly left:
+        // const speed = game_config.pipeSpeed * 0.15; 
+        // this.scrollOffset -= speed * (dt / 16.67);
     }
 }
 
@@ -2132,6 +2187,7 @@ function initGame({ jumpImmediately = true } = {}) {
     coins = [];
     powerUps = [];
     particles = [];
+    backgroundMountains = [];
     frameCount = 0;
     score = 0;
     flashTimer = 0;
