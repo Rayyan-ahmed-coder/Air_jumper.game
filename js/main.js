@@ -31,13 +31,7 @@ const PIE_2 = Math.PI * 2;
 const BASE_WIDTH = 820;
 const BASE_HEIGHT = 620;
 const STORAGE_KEY = 'air-jumper-stats';
-const colors = [
-    '#1c9c34', 
-    '#28eb59', 
-    '#74f193', 
-    '#1bd148', 
-    '#0f7d2a'
-];
+
 let canvasWidth = BASE_WIDTH;
 let canvasHeight = BASE_HEIGHT;
 let devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
@@ -89,25 +83,31 @@ const powerUpsState = {
     shield: false,
     magnet: false,
     doubleScore: false,
+    doubleCoin: false,
     tinyBird: false,
     slowMotion: false,
     dash: false,
-    phoenix: false
+    phoenix: false,
+    laser: false, 
+    gravityFlip: false, 
+    coinBlast: false,
+    shadowClone: false
 };
 
 const powerUpTimers = {
+    shield: 0,
     magnet: 0,
     doubleScore: 0,
+    doubleCoin: 0,
     tinyBird: 0,
     slowMotion: 0,
-    dash: 0
+    dash: 0, 
+    laser: 0, 
+    gravityFlip: 0,
+    shadowClone: 0
 };
 
 let gameState = Game_State.start;
-
-let mountainOffset1 = 0;
-let mountainOffset2 = 0;
-let mountainOffset3 = 0;
 
 let birdScale = 1;
 let gameSpeedMultiplier = 1;
@@ -197,18 +197,18 @@ function resizeCanvas() {
     }
 }
 
-function screenShake(integer) {
+function screenShake(intensity) {
     try {
         ctx.save();
-        if(integer > 0 && typeof integer === "number") {
+        if(intensity > 0 && typeof intensity === "number") {
             ctx.translate(
-                (Math.random() - .5) * integer,
-                (Math.random() - .5) * integer
+                (Math.random() - .5) * intensity,
+                (Math.random() - .5) * intensity
             );
-            integer *= .9;
-            if (integer < .1) integer = 0;
+            intensity *= .9;
+            if (intensity < .1) intensity = 0;
         } else {
-            console.error(`Wrong screen shake value: `, integer);
+            console.error(`Wrong screen shake value: `, intensity);
         }
     } catch (error) {
         console.error('Error occured in screenShake() function');
@@ -246,6 +246,14 @@ class Bird {
             this.y = canvasHeight - game_config.groundHeight - game_config.birdRadius;
             hitPlayer();
         }
+
+        if (powerUpsState.gravityFlip) {
+            // Invert gravity force direction smoothly
+            if (this.gravity > 0) this.gravity = -Math.abs(this.gravity);
+        } else {
+            if (this.gravity < 0) this.gravity = Math.abs(this.gravity);
+        }
+
     }
 
     jump() {
@@ -268,63 +276,232 @@ class Bird {
         ctx.scale(birdScale, birdScale);
         ctx.rotate(this.rotation);
 
+        // 1. Bird Shadow
+        ctx.shadowColor = 'rgba(255, 209, 102, 0.55)';
+        ctx.shadowBlur = 22;
+
+        // 2. Bird Body Gradient
         const gradient = ctx.createRadialGradient(-4, -4, 4, 0, 0, game_config.birdRadius * 1.5);
         gradient.addColorStop(0, '#fff7b8');
         gradient.addColorStop(0.25, '#ffd166');
         gradient.addColorStop(1, '#f6ae2d');
         ctx.fillStyle = gradient;
-        ctx.shadowColor = 'rgba(255, 209, 102, 0.55)';
-        ctx.shadowBlur = 22;
         ctx.beginPath();
-        ctx.arc(0, 0, game_config.birdRadius, 0, PIE_2);
+        ctx.arc(0, 0, game_config.birdRadius, 0, Math.PI * 2);
         ctx.fill();
 
-        const flap = Math.sin(frameCount * .45) * 12;
-        ctx.fillStyle="#ffd94d";
+        // 3. Wings (Layered behind the body)
+        const flap = Math.sin(frameCount * 0.45) * 12;
+        ctx.fillStyle = "#ffd94d";
+        
         ctx.beginPath();
-        ctx.ellipse(-10, flap, 10, 5, -.5, 0, PIE_2);
+        ctx.ellipse(-10, flap, 10, 5, -0.5, 0, Math.PI * 2);
         ctx.fill();
+        
         ctx.beginPath();
-        ctx.ellipse(10, flap, 10, 5, .5, 0, PIE_2);
+        ctx.ellipse(10, flap, 10, 5, 0.5, 0, Math.PI * 2);
         ctx.fill();
 
+        // 4. Eye 
         ctx.fillStyle = '#162a44';
         ctx.beginPath();
-        ctx.arc(6, -2, 4.5, 0, PIE_2);
+        ctx.arc(6, -2, 4.5, 0, Math.PI * 2);
         ctx.fill();
 
+        // 5. Outer Outline
         ctx.strokeStyle = '#1a49a1';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(0, 2, game_config.birdRadius + 2, 0, PIE_2);
+        ctx.arc(0, 2, game_config.birdRadius + 2, 0, Math.PI * 2);
         ctx.stroke();
+
+        // 6. Powerups
+        ctx.shadowBlur = 0;
+        ctx.beginPath();
         this.birdPowerUps();
-        ctx.restore();
+        ctx.closePath();
     }
 
     birdPowerUps() {
-        if(powerUpsState.shield) {
-            const pulse = Math.sin(frameCount * 0.1) * 2;
-            const bubbleRadius = game_config.birdRadius * 2 + pulse;
+        if (!PIE_2) {
+            const PIE_2 = Math.PI * 2;
+        }
 
-            ctx.shadowBlur = 0;
-            ctx.fillStyle = 'rgba(135, 206, 250, 0.75)'; // Translucent light blue
+        // LASER BEAM
+        if (powerUpsState.laser) {
+            ctx.save();
+            
+            // Origin locks cleanly onto the front face of the bird character model matrix
+            const lx = 14; 
+            const beamLength = 750; 
+            const flicker = Math.sin(Date.now() * 0.08);
+            
+            // A. LAYER 1: Mega-Wide Plasma Glow Envelope
+            ctx.strokeStyle = "rgba(255, 0, 60, 0.25)";
+            ctx.lineWidth = 32 + flicker * 8;
+            ctx.beginPath();
+            ctx.moveTo(lx, 0); ctx.lineTo(lx + beamLength, 0);
+            ctx.stroke();
+
+            // B. LAYER 2: Hot Ionized Crimson Core Beam
+            ctx.strokeStyle = "#ff003c";
+            ctx.lineWidth = 14 + flicker * 4;
+            ctx.shadowColor = "#ff3300";
+            ctx.shadowBlur = 25; // High bloom impact layer
+            ctx.beginPath();
+            ctx.moveTo(lx, 0); ctx.lineTo(lx + beamLength, 0);
+            ctx.stroke();
+
+            // C. LAYER 3: White-Hot Concentrated Energy Core Rail
+            ctx.shadowBlur = 0; 
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = 4 + Math.abs(flicker) * 2;
+            ctx.beginPath();
+            ctx.moveTo(lx, 0); ctx.lineTo(lx + beamLength, 0);
+            ctx.stroke();
+
+            // D. BURNING EFFECTS ENGINE: Spawns high-intensity sparks into your global array
+            if (Math.random() < 0.45 && typeof particles !== "undefined") {
+                // Converts the bird's relative face translation out into screen coordinates
+                const globalLaserX = this.x + lx * Math.cos(this.rotation);
+                const globalLaserY = this.y + lx * Math.sin(this.rotation);
+
+                for (let i = 0; i < 2; i++) {
+                    particles.push({
+                        x: globalLaserX + Math.random() * 20,
+                        y: globalLaserY + (Math.random() - 0.5) * 15,
+                        vx: (Math.random() * 3 + 1) * gameSpeedMultiplier,
+                        vy: (Math.random() - 0.5) * 4,
+                        size: Math.random() * 4 + 2,
+                        life: 30,
+                        maxLife: 30,
+                        color: Math.random() < 0.6 ? "#ffcc00" : "#ff3300",
+                        update: function(timeFactor) {
+                            this.x += this.vx;
+                            this.y += this.vy;
+                            this.vy += 0.1; // Subtle gravitational fall for burning embers
+                            this.size = Math.max(0.1, this.size * 0.94);
+                            this.life--;
+                        },
+                        draw: function() {
+                            ctx.save();
+                            ctx.setTransform(1, 0, 0, 1, 0, 0); // Resets context safely to screen-space
+                            ctx.globalAlpha = this.life / this.maxLife;
+                            ctx.fillStyle = this.color;
+                            ctx.beginPath();
+                            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                            ctx.fill();
+                            ctx.restore();
+                        }
+                    });
+                }
+            }
+            ctx.restore();
+        }
+        
+        // --- CLONE RENDERING MECHANIC ---
+        if (powerUpsState.shadowClone && this.clones) {
+            this.clones.forEach(clone => {
+                ctx.save();
+                const wave = Math.sin(clone.phase) * 8;
+                
+                ctx.translate(-25, clone.yOffset + wave);
+                ctx.globalAlpha = clone.alpha;
+
+                ctx.shadowColor = '#bd00ff';
+                ctx.shadowBlur = 18;
+
+                const cloneGrad = ctx.createRadialGradient(-4, -4, 4, 0, 0, game_config.birdRadius * 1.5);
+                cloneGrad.addColorStop(0, '#f9d6ff');
+                cloneGrad.addColorStop(0.4, '#bd00ff');
+                cloneGrad.addColorStop(1, '#4a0066');
+
+                ctx.fillStyle = cloneGrad;
+                ctx.strokeStyle = '#e200ff';
+                ctx.lineWidth = 2.5;
+
+                ctx.beginPath();
+                ctx.arc(0, 0, game_config.birdRadius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(6, -2, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+            });
+        }
+
+        if (powerUpsState.shield) {
+            ctx.save();
+            // Check if shield is critically low (less than 3 seconds / 180 frames left)
+            const framesLeft = powerUpTimers.shield;
+            const isLow = framesLeft > 0 && framesLeft < 180;
+            
+            // Base animations
+            let pulse = Math.sin(frameCount * 0.1) * 3;
+            let bubbleRadius = game_config.birdRadius * 1.8 + pulse;
+            
+            // Default Blue Colors
+            let coreColor = 'rgba(52, 152, 219, 0.1)';
+            let glowColor = 'rgba(135, 206, 250, 0.35)';
+            let edgeColor = 'rgba(52, 152, 219, 0.7)';
+            let strokeColor = '#5dade2';
+            let glowHex = '#3498db';
+
+            if (isLow) {
+                // Speed up the pulse animation mathematically to look unstable
+                pulse = Math.sin(frameCount * 0.3) * 6; 
+                bubbleRadius = game_config.birdRadius * 1.8 + pulse;
+
+                // Make it rapidly flash red/orange using the frameCount math
+                const flashState = Math.floor(frameCount / 4) % 2 === 0;
+                if (flashState) {
+                    coreColor = 'rgba(231, 76, 60, 0.15)';   // Red core tint
+                    glowColor = 'rgba(241, 196, 15, 0.4)';   // Orange intermediate
+                    edgeColor = 'rgba(231, 76, 60, 0.85)';   // Bright danger edge
+                    strokeColor = '#ec7063';
+                    glowHex = '#e74c3c';
+                }
+            }
+
+            // Apply calculated radial glow styles
+            const shieldGrad = ctx.createRadialGradient(0, 0, bubbleRadius * 0.5, 0, 0, bubbleRadius);
+            shieldGrad.addColorStop(0, coreColor);  
+            shieldGrad.addColorStop(0.8, glowColor); 
+            shieldGrad.addColorStop(1, edgeColor);   
+
+            ctx.fillStyle = shieldGrad;
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = 3;
+            ctx.shadowColor = glowHex;
+            ctx.shadowBlur = isLow ? 25 : 15; // Makes it glow intensely when unstable
+
+            // Render Shield Globe
             ctx.beginPath();
             ctx.arc(0, 0, bubbleRadius, 0, PIE_2);
             ctx.fill();
-
-            ctx.strokeStyle = '#3498db'; // Bright blue border
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.arc(0, 0, bubbleRadius, 0, PIE_2);
             ctx.stroke();
+            ctx.restore();
         }
 
         if (powerUpsState.magnet) {
-            ctx.strokeStyle="rgba(255,80,80,.35)";
+            ctx.save();
+            // Creates a rotating/moving dashed wave representing magnetic pull
+            ctx.strokeStyle = "rgba(255, 100, 100, 0.65)";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([8, 12]); // Crisp arcade dash lines
+            ctx.lineDashOffset = -frameCount * 1.5; // Animates moving inward/outward
+
+            ctx.shadowColor = "rgba(255, 80, 80, 0.5)";
+            ctx.shadowBlur = 10;
+
             ctx.beginPath();
             ctx.arc(0, 0, 170, 0, PIE_2);
             ctx.stroke();
+            ctx.restore();
         }
     }
 }
@@ -340,51 +517,107 @@ class Pipe {
         this.topHeight = this.top;
         this.bottomY = this.bottom;
         this.bottomHeight = canvasHeight - this.bottomY;
-        this.capHeight = 24;
-        this.capOffset = 4;
+        this.capHeight = 26; // Snug vertical balance
+        this.capOffset = 5;  // Slightly wider brim for cleaner contrast
+        
+        // Internal pulse timing tracker for the animated glow streaks
+        this.glowPulse = Math.random() * Math.PI;
     }
 
     update(dt) {
-        this.x -= this.speed * gameSpeedMultiplier * (dt / 16.67);
+        const deltaTime = dt || 16.67;
+        const timeFactor = deltaTime / 16.67;
+        
+        this.x -= this.speed * gameSpeedMultiplier * timeFactor;
+        this.glowPulse += 0.05 * timeFactor; // Animates neon lights
     }
 
     draw() {
+        const colors = [
+            '#1c9c34', 
+            '#28eb59', 
+            '#4eeb75', 
+            '#1bd148', 
+            '#0f7d2a'
+        ];
         ctx.save();
 
-        const pipeGradient = ctx.createLinearGradient(this.x, 0, this.x + this.width, 0);
-        pipeGradient.addColorStop(0.0, colors[0]);
-        pipeGradient.addColorStop(0.15, colors[1]);
-        pipeGradient.addColorStop(0.4, colors[2]);
-        pipeGradient.addColorStop(0.7, colors[3]);
-        pipeGradient.addColorStop(1.0, colors[4]);
+        // 1. MAIN METALLIC GRADIENT CONFIGURATION
+        // Ensures your input colors look completely 3D by building a specular cylindrical sheen maps
+        const getPipeGradient = (startX, endX) => {
+            const grad = ctx.createLinearGradient(startX, 0, endX, 0);
+            grad.addColorStop(0.0, colors[0] || '#112233'); // Dark left edge
+            grad.addColorStop(0.2, colors[1] || '#224466'); // Base body
+            grad.addColorStop(0.5, colors[2] || '#44aaee'); // Specular center core highlight
+            grad.addColorStop(0.8, colors[3] || '#1c5588'); // Secondary midtone
+            grad.addColorStop(1.0, colors[4] || '#0b1b2b'); // Deep right shadow
+            return grad;
+        };
 
-        ctx.fillStyle = pipeGradient;
-        ctx.shadowColor = 'rgba(69, 118, 255, 0.45)';
-        ctx.shadowBlur = 16;
-        ctx.fillRect(this.x, 0, this.width, this.topHeight);
-        ctx.fillRect(this.x, this.bottomY, this.width, this.bottomHeight);
-        ctx.shadowBlur = 0;
-        const capGradient = ctx.createLinearGradient(this.x - this.capOffset, 0, this.x + this.width + this.capOffset, 0);
-        capGradient.addColorStop(0.0, colors[0]);
-        capGradient.addColorStop(0.15, colors[1]);
-        capGradient.addColorStop(0.4, colors[2]);
-        capGradient.addColorStop(0.7, colors[3]);
-        capGradient.addColorStop(1.0, colors[4]);
-        ctx.fillStyle = capGradient;
+        const pipeGrad = getPipeGradient(this.x, this.x + this.width);
+        const capGrad = getPipeGradient(this.x - this.capOffset, this.x + this.width + this.capOffset);
 
+        // 2. LAYER 1: AMBIENT OUTER BLUR GLOW
+        ctx.shadowColor = 'rgba(69, 118, 255, 0.5)';
+        ctx.shadowBlur = 18;
+
+        // 3. LAYER 2: SHARP STROKING AND BASE STRUCTURAL FILLS
+        // Top Main Body
+        ctx.fillStyle = pipeGrad;
+        ctx.fillRect(this.x, 0, this.width, this.topHeight - this.capHeight);
+        
+        // Bottom Main Body
+        ctx.fillRect(this.x, this.bottomY + this.capHeight, this.width, this.bottomHeight - this.capHeight);
+
+        // Render Flanged Rim Caps
+        ctx.fillStyle = capGrad;
         ctx.fillRect(this.x - this.capOffset, this.topHeight - this.capHeight, this.width + this.capOffset * 2, this.capHeight);
         ctx.fillRect(this.x - this.capOffset, this.bottomY, this.width + this.capOffset * 2, this.capHeight);
 
-        ctx.fillStyle = '#112b41';
+        // Clear glows immediately so internal geometry doesn't turn muddy
+        ctx.shadowBlur = 0; 
+
+        // 4. LAYER 3: ADVANCED STRUCTURAL INNER DEPTH SHADOWS
+        // Inner Lip Crease Shadows (112b41)
+        ctx.fillStyle = '#050d14';
         ctx.fillRect(this.x - this.capOffset, this.topHeight - 4, this.width + this.capOffset * 2, 4);
         ctx.fillRect(this.x - this.capOffset, this.bottomY, this.width + this.capOffset * 2, 4);
 
-        ctx.strokeStyle = '#0a1d2d';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(this.x, 0, this.width, this.topHeight - this.capHeight);
-        ctx.strokeRect(this.x - this.capOffset, this.topHeight - this.capHeight, this.width + this.capOffset * 2, this.capHeight);
-        ctx.strokeRect(this.x - this.capOffset, this.bottomY, this.width + this.capOffset * 2, this.capHeight);
-        ctx.strokeRect(this.x, this.bottomY + this.capHeight, this.width, this.bottomHeight - this.capHeight);
+        // Drop shadow UNDER the caps looking down/up onto long shafts
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.fillRect(this.x, this.topHeight, this.width, 8);
+        ctx.fillRect(this.x, this.bottomY + this.capHeight, this.width, 8);
+
+        // 5. LAYER 4: ANIME STYLE CHROME GLOW STRIPS (DYNAMIC NEON RECTANGLES)
+        const pulseWidth = 2 + Math.sin(this.glowPulse) * 1.5;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+        
+        // Vertical sheen streak running through both pipes symmetrically
+        const stripX = this.x + this.width * 0.35;
+        ctx.fillRect(stripX, 0, pulseWidth, this.topHeight - this.capHeight);
+        ctx.fillRect(stripX, this.bottomY + this.capHeight, pulseWidth, this.bottomHeight - this.capHeight);
+
+        // Horizontal accent line details embedded directly on cap rims
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.fillRect(this.x - this.capOffset + 4, this.topHeight - this.capHeight + 4, this.width + (this.capOffset * 2) - 8, 2);
+        ctx.fillRect(this.x - this.capOffset + 4, this.bottomY + this.capHeight - 6, this.width + (this.capOffset * 2) - 8, 2);
+
+        // 6. LAYER 5: VECTOR STROKE WRAPPING (CLEANS UP OVERLAPS)
+        ctx.strokeStyle = '#050d14';
+        ctx.lineWidth = 2.5;
+
+        // Draw Shaft Outlines
+        ctx.beginPath();
+        ctx.rect(this.x, -10, this.width, this.topHeight - this.capHeight + 10);
+        ctx.rect(this.x, this.bottomY + this.capHeight, this.width, this.bottomHeight + 10);
+        ctx.stroke();
+
+        // Draw Cap Outlines
+        ctx.beginPath();
+        ctx.rect(this.x - this.capOffset, this.topHeight - this.capHeight, this.width + this.capOffset * 2, this.capHeight);
+        ctx.rect(this.x - this.capOffset, this.bottomY, this.width + this.capOffset * 2, this.capHeight);
+        ctx.stroke();
+
         ctx.restore();
     }
 
@@ -401,143 +634,324 @@ class Coin {
     constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.angle = 0; // Renamed from scaleX for semantic clarity
-        this.size = 20;
+        this.angle = Math.random() * Math.PI;
+        this.size = 26;
         this.speed = game_config.pipeSpeed + Math.min(score * game_config.difficultyRamp, 1.4) * 0.3;
         this.collected = false;
+
+        // Properties for the floating "+1" text
+        this.textYOffset = Math.random() * -2;
+        this.textAlpha = 1;
     }
 
     update(dt) {
         const deltaTime = dt || 16.67;
-        this.x -= this.speed * gameSpeedMultiplier * (deltaTime / 16.67);
-        this.angle += 0.05 * (deltaTime / 16.67);
+        const timeFactor = deltaTime / 16.67;
+
+        if (!this.collected) {
+            // Normal movement while active
+            this.x -= this.speed * gameSpeedMultiplier * timeFactor;
+            this.angle += 0.08 * timeFactor; // Snappier spin rate
+        } else if (this.textAlpha > 0) {
+            // Animate the "+1" score popup after collection
+            this.textYOffset -= 1.5 * timeFactor;
+            this.textAlpha -= 0.04 * timeFactor;
+        }
     }
 
     draw() {
+        // Stop drawing entirely once the floating text fades out
+        if (this.collected && this.textAlpha <= 0) return;
+
         ctx.save();
-        ctx.translate(this.x, this.y);
-        const currentScaleX = Math.abs(Math.cos(this.angle));
-        ctx.scale(currentScaleX, 1);
-        ctx.shadowColor = 'rgba(233, 200, 94, 0.81)';
-        ctx.shadowBlur = 10;
-        ctx.fillStyle = '#ffd22e';
-        ctx.beginPath();
-        ctx.arc(0, 0, this.size / 2, 0, PIE_2);
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = 'rgb(255, 114, 32)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, (this.size / 2) + 2, 0, PIE_2);
-        ctx.closePath();
-        ctx.stroke();
+
+        if (!this.collected) {
+            // --- DRAW THE GOLD SPINNING COIN ---
+            ctx.translate(this.x, this.y);
+            
+            // Calculate a true 3D horizontal flip scale matrix
+            const currentScaleX = Math.cos(this.angle);
+            ctx.scale(Math.abs(currentScaleX), 1);
+
+            // Dynamic lighting depth: shifts color slightly depending on the spin angle
+            const isFront = currentScaleX > 0;
+            const coinGold = isFront ? '#ffd22e' : '#e6b61f';
+            const edgeCopper = isFront ? '#ff7220' : '#d45611';
+
+            // Layer 1: Enhanced Golden Radial Ambient Glow
+            ctx.shadowColor = 'rgba(255, 210, 46, 0.6)';
+            ctx.shadowBlur = 15;
+
+            // Layer 2: Main Coin Body Solid Fill
+            ctx.fillStyle = coinGold;
+            ctx.beginPath();
+            ctx.arc(0, 0, this.size / 2, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Layer 3: Thick Premium Outer Rim
+            ctx.shadowBlur = 0; // Clear shadow for crisp line work
+            ctx.strokeStyle = edgeCopper;
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+
+            // Layer 4: Delicate Inset Detail Ring
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(0, 0, (this.size / 2) - 3, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Layer 5: Embossed "$" Currency Symbol
+            ctx.fillStyle = edgeCopper;
+            ctx.font = `bold ${this.size * 0.6}px Arial`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("$", 0, 0.5);
+
+        } else {
+            // --- DRAW FLOATING "+1" TEXT ON COLLECTION ---
+            ctx.translate(this.x, this.y + this.textYOffset);
+            ctx.globalAlpha = Math.max(0, this.textAlpha);
+            
+            // Golden glow text effect
+            ctx.shadowColor = '#e4c556d0';
+            ctx.shadowBlur = 10;
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `bold ${this.size * 2}px sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(`+1`, 0, 0);
+        }
+
         ctx.restore();
     }
 
     collidesWith(bird) {
+        if (this.collected) return false;
         const dx = bird.x - this.x;
         const dy = bird.y - this.y;
         const max = game_config.birdRadius + this.size / 2;
-        return dx * dx + dy * dy < max * max;
+        const isColliding = dx * dx + dy * dy < max * max;
+        
+        if (isColliding) {
+            this.collected = true; // Flips state flag to trigger update text animation
+        }
+        
+        return isColliding;
     }
 }
 
 class PowerUp {
-    constructor(x, y) {
+    constructor(x, y, forcedType = null) {
         this.x = x;
         this.y = y;
         this.size = 18;
         this.collected = false;
+        this.isDead = false; 
         this.rotation = 0;
-        this.pulse = 0;
+        this.pulse = Math.random() * Math.PI; 
         
-        // Configuration for colors, symbols, and distinct design rules
+        // Text animation parameters
+        this.textYOffset = 0;
+        this.textAlpha = 1;
+        this.textScale = 0.3; // Starts small for a punchy scale-in effect
+
         this.powerUpMeta = {
-            shield:       { color: "#ff5ca8", bg: "#4a1230", icon: "🛡️", isEmoji: true },
-            magnet:       { color: "#ff4040", bg: "#4a1010", icon: "🧲", isEmoji: true },
-            doubleScore:  { color: "#ffd93d", bg: "#4a3b0a", icon: "×2", isEmoji: false },
-            tinyBird:     { color: "#55ff99", bg: "#0f4a27", icon: "⬇", isEmoji: false },
-            slowMotion:   { color: "#5ac8ff", bg: "#0f364a", icon: "❄️", isEmoji: true },
-            dash:         { color: "#8d5cff", bg: "#250f4a", icon: "⚡", isEmoji: true },
-            phoenix:      { color: "#ff7b00", bg: "#4a220f", icon: "🔥", isEmoji: true }
+            shield:       { color: "#ff5ca8", bg: "#4a1230", icon: "🛡️", isEmoji: true,  label: "SHIELD!" },
+            magnet:       { color: "#ff4040", bg: "#4a1010", icon: "🧲", isEmoji: true,  label: "MAGNET!" },
+            doubleScore:  { color: "#ffd93d", bg: "#4a3b0a", icon: "×2", isEmoji: false, label: "2x SCORE!" },
+            doubleCoin:   { color: '#fffd90', bg: '#4a3b0a', icon: '2¢', isEmoji: false, label: "2x COINS!" },
+            tinyBird:     { color: "#55ff99", bg: "#0f4a27", icon: "⬇",  isEmoji: false, label: "TINY BIRD!" },
+            slowMotion:   { color: "#5ac8ff", bg: "#0f364a", icon: "❄️", isEmoji: true,  label: "SLOW MO!" },
+            dash:         { color: "#8d5cff", bg: "#250f4a", icon: "⚡", isEmoji: true,  label: "DASH!" },
+            laser:        { color: "#ff003c", bg: "#96001e", icon: "💥", isEmoji: true, label: "LASER BEEM!"},
+            shadowClone:  { color: "#bd00ff", bg: "#51225e", icon: "👥", isEmoji: true,  label: "SHADOW CLONE!" },
+            phoenix:      { color: "#ff7b00", bg: "#4a220f", icon: "🔥", isEmoji: true,  label: "PHOENIX!" }
         };
 
         const types = Object.keys(this.powerUpMeta);
-        this.type = types[Math.floor(Math.random() * types.length)];
+        this.type = forcedType || types[Math.floor(Math.random() * types.length)];
     }
 
-    update(dt) {
-        const speed = (game_config.pipeSpeed + Math.min(score * game_config.difficultyRamp, 1.2) * 0.5) * gameSpeedMultiplier;
-        this.x -= speed * (dt / 16.67);
-        
-        // Time-independent smooth rotations and floating animations
-        const timeFactor = dt / 16.67;
-        this.rotation += 0.04 * timeFactor;
-        this.pulse += 0.1 * timeFactor;
+    update(dt, bird) {
+        const deltaTime = dt || 16.67;
+        const timeFactor = deltaTime / 16.67;
+
+        if (!this.collected) {
+            // --- MAGNETIC ATTRACTION ---
+            if (bird) {
+                const dx = bird.x - this.x;
+                const dy = bird.y - this.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                // Pull range is larger if magnet powerup is already active on the bird
+                const attractionRadius = powerUpsState.magnet ? 240 : 160;
+                
+                if (distance < attractionRadius) {
+                    const pullForce = (attractionRadius - distance) * 0.06;
+                    this.x += (dx / distance) * pullForce * timeFactor;
+                    this.y += (dy / distance) * pullForce * timeFactor;
+                }
+            }
+
+            // Normal scroll movement
+            const speed = (game_config.pipeSpeed + Math.min(score * game_config.difficultyRamp, 1.2) * 0.5) * gameSpeedMultiplier;
+            this.x -= speed * timeFactor;
+            
+            this.rotation += 0.04 * timeFactor;
+            this.pulse += 0.08 * timeFactor;
+
+            // Spawn clean ambiance particles behind active orbs occasionally
+            if (Math.random() < 0.15 && typeof particles !== "undefined") {
+                const meta = this.powerUpMeta[this.type];
+                particles.push({
+                    x: this.x + (Math.random() - 0.5) * 10,
+                    y: this.y + (Math.random() - 0.5) * 10,
+                    vx: -speed * 0.5,
+                    vy: (Math.random() - 0.5) * 1,
+                    life: 25,
+                    maxLife: 25,
+                    color: meta.color,
+                    update: function() { this.x += this.vx; this.y += this.vy; this.life--; },
+                    draw: function() {
+                        ctx.save();
+                        ctx.globalAlpha = this.life / this.maxLife;
+                        ctx.fillStyle = this.color;
+                        ctx.beginPath();
+                        ctx.arc(this.x, this.y, 3, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.restore();
+                    }
+                });
+            }
+
+        } else if (!this.isDead) {
+            // --- EXPONENTIALLY DECAY TEXT POSITION ---
+            this.textYOffset -= 1.8 * timeFactor;
+            this.textAlpha -= 0.025 * timeFactor;
+            this.textScale = Math.min(1.2, this.textScale + 0.08 * timeFactor); // Pops outward
+            
+            if (this.textAlpha <= 0) {
+                this.isDead = true;
+            }
+        }
     }
 
     draw() {
-        if (this.collected) return;
+        if (this.isDead) return;
 
         const meta = this.powerUpMeta[this.type];
         const pulseScale = 1 + Math.sin(this.pulse) * 0.08;
-        
         ctx.save();
-        ctx.translate(this.x, this.y);
 
-        // --- LAYER 1: Core Ambient Background Glow ---
-        ctx.shadowColor = meta.color;
-        ctx.shadowBlur = 25 + Math.sin(this.pulse) * 10;
-        
-        // --- LAYER 2: Outer Techno Ring (Rotates) ---
-        ctx.save();
-        ctx.rotate(this.rotation);
-        ctx.strokeStyle = meta.color;
-        ctx.lineWidth = 3;
-        ctx.setLineDash([8, 8]); // Dashed sci-fi ring effect
-        ctx.beginPath();
-        ctx.arc(0, 0, this.size * pulseScale * 1.2, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
+        if (!this.collected) {
+            ctx.translate(this.x, this.y);
+            
+            // Layer 1: Ambient Neon Base Glow
+            ctx.shadowColor = meta.color;
+            ctx.shadowBlur = 22 + Math.sin(this.pulse) * 6;
+            
+            // Layer 2: Complex Dual Techno Rings (Counter-Rotating)
+            ctx.save();
+            ctx.rotate(this.rotation);
+            ctx.strokeStyle = meta.color;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([8, 4]); 
+            ctx.beginPath();
+            ctx.arc(0, 0, this.size * pulseScale * 1.3, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
 
-        // --- LAYER 3: Dark Inner Core Orb ---
-        ctx.shadowBlur = 0; // Clear shadow to keep the inner core sharp
-        ctx.fillStyle = meta.bg;
-        ctx.strokeStyle = meta.color;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, this.size * pulseScale, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
+            ctx.save();
+            ctx.rotate(-this.rotation * 0.6); 
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([2, 8]);
+            ctx.beginPath();
+            ctx.arc(0, 0, this.size * pulseScale * 1.5, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
 
-        // --- LAYER 4: Glowing Foreground Icon ---
-        ctx.save();
-        // Emojis shouldn't spin or they look messy; text like "×2" stays upright
-        if (!meta.isEmoji) {
-            ctx.rotate(this.rotation * -0.5); // Slow counter-rotation for text
+            // Layer 3: High-Contrast Radial Gradient Orb Base
+            ctx.shadowBlur = 0; 
+            const orbGrad = ctx.createRadialGradient(-this.size * 0.3, -this.size * 0.3, 2, 0, 0, this.size * pulseScale);
+            orbGrad.addColorStop(0, '#ffffff');
+            orbGrad.addColorStop(0.3, meta.color);
+            orbGrad.addColorStop(1, meta.bg);
+
+            ctx.fillStyle = orbGrad;
+            ctx.strokeStyle = meta.color;
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.arc(0, 0, this.size * pulseScale, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            // Glossy crescent highlights
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.beginPath();
+            ctx.arc(-2, -2, this.size * pulseScale * 0.7, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Layer 4: Symbol Rendering
+            ctx.save();
+            if (!meta.isEmoji) {
+                ctx.rotate(this.rotation * -0.2); 
+            }
+            
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 15px Arial";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(meta.icon, 0, meta.isEmoji ? -1 : 0);
+            ctx.restore();
+
+        } else {
+            // --- JUICY FLOATING NOTIFICATION TEXT ---
+            ctx.translate(this.x, this.y + this.textYOffset);
+            ctx.scale(this.textScale, this.textScale);
+            ctx.globalAlpha = Math.max(0, this.textAlpha);
+            
+            // Text Drop Shadow / Outer Glow Simulation
+            ctx.font = "bold 22px Inter, Impact, Arial";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            
+            ctx.strokeStyle = meta.bg;
+            ctx.lineWidth = 5;
+            ctx.strokeText(meta.label, 0, 0);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(meta.label, 0, 0);
+            
+            // Dynamic Accent underline bar
+            ctx.strokeStyle = meta.color;
+            ctx.lineWidth = 3;
+            ctx.shadowColor = meta.color;
+            ctx.shadowBlur = 10;
+            ctx.beginPath();
+            ctx.moveTo(-50 * this.textAlpha, 16);
+            ctx.lineTo(50 * this.textAlpha, 16);
+            ctx.stroke();
         }
-        
-        // Subtle icon pop glow
-        ctx.shadowColor = meta.color;
-        ctx.shadowBlur = 10;
-        ctx.fillStyle = meta.isEmoji ? "#ffffff" : meta.color;
-        ctx.font = "bold 16px sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        
-        // Offset adjustment: clean up vertical text alignment differences
-        const yOffset = meta.isEmoji ? 0 : 1; 
-        ctx.fillText(meta.icon, 0, yOffset);
-        ctx.restore();
 
         ctx.restore();
     }
 
     collidesWith(bird) {
+        if (this.collected) return false;
         const dx = bird.x - this.x;
         const dy = bird.y - this.y;
-        const targetDist = game_config.birdRadius + (this.size * 1.2); // Generous hitbox for outer ring
-        return (dx * dx + dy * dy) < (targetDist * targetDist);
+        
+        // Account for varying sizes if tinyBird powerup is active
+        const actualBirdRadius = (typeof birdScale !== "undefined" && birdScale < 1) ? game_config.birdRadius * 0.6 : game_config.birdRadius;
+        const targetDist = actualBirdRadius + (this.size * 1.1);
+        
+        if ((dx * dx + dy * dy) < (targetDist * targetDist)) {
+            this.collected = true; 
+            return true;
+        }
+        return false;
     }
 }
 
@@ -682,11 +1096,11 @@ class Cloud {
         g.addColorStop(1, lerpColor('rgb(255, 255, 255)', 'rgb(134, 162, 197)',  0.18, skyBrightness, 'oklab'));
         ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(0,8,24,0,PIE_2);
-        ctx.arc(20,-6,26,0,PIE_2);
-        ctx.arc(46,-4,24,0,PIE_2);
-        ctx.arc(70,8,26,0,PIE_2);
-        ctx.arc(35,18,28,0,PIE_2);
+        ctx.arc(1,6,26,0,PIE_2);
+        ctx.arc(20,-6,28,0,PIE_2);
+        ctx.arc(46,-4,26,0,PIE_2);
+        ctx.arc(70,8,28,0,PIE_2);
+        ctx.arc(35,18,30,0,PIE_2);
         ctx.fill();
         ctx.restore();
     }
@@ -704,7 +1118,7 @@ class Star {
         // Restrict stars to the top half of the screen
         this.y = Math.random() * (canvasHeight * 0.48); 
         this.radius = 0.5 + Math.random() * 1.5;
-        this.speed = 0.015 + Math.random() * 0.02;
+        this.speed = 0.01 + Math.random() * 0.02;
         this.rotation = Math.random() * Math.PI; // Custom rotation angle
         
         // Pick a realistic star color tint
@@ -727,7 +1141,6 @@ class Star {
         // Calculate a clean twinkle multiplier between 0.2 and 1.0
         const twinkle = 0.6 + 0.4 * Math.sin(this.phase);
         const currentAlpha = 0.3 + 0.7 * Math.sin(this.phase);
-        ctx.save();
         ctx.translate(this.x, this.y);
         ctx.rotate(this.rotation);
 
@@ -755,8 +1168,6 @@ class Star {
         ctx.beginPath();
         ctx.arc(0, 0, this.radius * 0.6 * twinkle, 0, Math.PI * 2);
         ctx.fill();
-
-        ctx.restore();
     }
 }
 
@@ -809,32 +1220,146 @@ function createCoinExplosion(x, y) {
     }
 }
 
-function drawPowerUps() {
-    ctx.save();
-    ctx.font = "20px Arial";
-    ctx.textAlign = "left";
-    let y = 35;
-    const icons = {
-        shield: "🛡",
-        magnet: "🧲",
-        doubleScore: "⭐",
-        tinyBird: "🐦",
-        slowMotion: "❄",
-        dash: "⚡",
-        phoenix: "🔥"
+function drawPowerUpMeters() {
+    let y = 48; 
+    const w = 190, h = 16, pad = 15; // Balanced visual layout anchors
+
+    // 🚀 STYLES CONFIG: Added 'isBar' flag to change layout style dynamically
+    const styles = {
+        shield:      { txt: "SHIELD",      ico: "🛡️", cA: "#ff5ca8", cB: "#bc1360", max: 480, isBar: true },
+        magnet:      { txt: "MAGNET",      ico: "🧲", cA: "#ff4040", cB: "#9e0c0c", max: 600, isBar: true },
+        doubleScore: { txt: "SCORE x2",    ico: "⭐", cA: "#ffd93d", cB: "#b2920c", max: 600, isBar: true },
+        doubleCoin:  { txt: "COINS x2",    ico: "🪙", cA: "#fffd90", cB: "#bcae13", max: 900, isBar: true },
+        tinyBird:    { txt: "TINY BIRD",   ico: "⬇️", cA: "#55ff99", cB: "#099a43", max: 600, isBar: true },
+        slowMotion:  { txt: "SLOW-MO",     ico: "❄️", cA: "#5ac8ff", cB: "#0b6fa0", max: 720, isBar: true },
+        dash:        { txt: "WARP DASH",   ico: "⚡", cA: "#8d5cff", cB: "#4915bc", max: 480, isBar: true },
+        laser:       { txt: "OMEGA LASER", ico: "💥", cA: "#ff003c", cB: "#96001e", max: 360, isBar: true }, 
+        gravityFlip: { txt: "GRAVITY FLIP",ico: "🔄", cA: "#00ffcc", cB: "#00997a", max: 480, isBar: true },
+        shadowClone: { txt: "CLONE TEAM",  ico: "👥", cA: "#bd00ff", cB: "#630084", max: 720, isBar: true },
+        
+        // 🚀 NEW NON-BAR PASSIVES (Like your Phoenix revival state)
+        phoenix:     { txt: "PHOENIX REVIVE", ico: "🔥", cA: "#ff7b00", cB: "#963a00", max: 0,   isBar: false }
     };
-    
-    for(const key in powerUpsState) {
-        if (powerUpsState[key]) {
-            let text = icons[key];
-            if (powerUpTimers[key]) {
-                text += " "+ Math.ceil(powerUpTimers[key] / 60);
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // Lock straight to absolute screen coordinates
+    ctx.shadowBlur = 0; // Hardware acceleration performance maintainer
+
+    Object.keys(powerUpsState).forEach(key => {
+        const active = powerUpsState[key], s = styles[key];
+        if (!active || !s) return; // Skip if power-up isn't active or config doesn't exist
+
+        const time = powerUpTimers[key] || 0;
+        const isLow = s.isBar && time < 120;
+        const fillW = s.isBar ? w * (time / s.max) : 0;
+        const flashCondition = isLow && (Math.floor(frameCount / 4) % 2 === 0);
+
+        // ----------------------------------------------------
+        // STYLE METHOD A: TIMED PROGRESS BAR LAYOUT (`isBar === true`)
+        // ----------------------------------------------------
+        if (s.isBar) {
+            if (time <= 0) return; // Hide bars if out of time frames
+            const secStr = `${(time / 60).toFixed(1)}s`;
+
+            ctx.textBaseline = "bottom";
+
+            // Oversized Icon
+            ctx.font = "22px sans-serif"; ctx.textAlign = "left";
+            ctx.fillText(s.ico, pad, y - 4);
+
+            // Label Text
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 13px 'Impact', 'Arial Black', sans-serif";
+            ctx.fillText(s.txt, pad + 28, y - 6);
+
+            // Timer Clock Text
+            ctx.fillStyle = flashCondition ? "#ff333c" : s.cA;
+            ctx.font = "900 13px monospace"; ctx.textAlign = "right";
+            ctx.fillText(secStr, pad + w, y - 6);
+
+            // Slanted Track Backing
+            ctx.fillStyle = "rgba(4, 8, 18, 0.9)"; ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(pad, y); ctx.lineTo(pad + w, y);
+            ctx.lineTo(pad + w + 5, y + h); ctx.lineTo(pad + 5, y + h);
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+
+            // Progress Fill
+            if (fillW > 2) {
+                ctx.save();
+                const grad = ctx.createLinearGradient(pad, 0, pad + w, 0);
+                grad.addColorStop(0, s.cB); grad.addColorStop(1, s.cA);
+                ctx.fillStyle = grad;
+
+                ctx.beginPath();
+                ctx.moveTo(pad, y); ctx.lineTo(pad + fillW, y);
+                ctx.lineTo(pad + 5 + fillW, y + h); ctx.lineTo(pad + 5, y + h);
+                ctx.closePath(); ctx.fill();
+
+                ctx.strokeStyle = flashCondition ? "#ff003c" : s.cA;
+                ctx.lineWidth = 1.5; ctx.stroke();
+                
+                // Tube shine lines
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.3)"; ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(pad + 1, y + 2); ctx.lineTo(pad + fillW - 1, y + 2); ctx.stroke();
+                ctx.restore();
             }
-            ctx.fillStyle = "white";
-            ctx.fillText(text, 20, y);
-            y += 28;
+
+            // Interface Frame Brackets
+            ctx.strokeStyle = flashCondition ? "#ff003c" : "rgba(255,255,255,0.2)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(pad - 6, y - 2); ctx.lineTo(pad - 6, y + h + 2); ctx.lineTo(pad, y + h + 2);
+            ctx.stroke();
+
+            y += 58; // Step height layout calculation down for next item
+        } 
+        
+        // STYLE METHOD B: INFINITE OR TOGGLE TOKEN BADGE (`isBar === false`)
+        else {
+            ctx.save();
+            const badgeSize = 32;
+            const pulseRadius = Math.sin(frameCount * 0.08) * 3;
+
+            // Ambient background token tray shape
+            ctx.fillStyle = "rgba(4, 8, 18, 0.85)";
+            ctx.strokeStyle = s.cA;
+            ctx.lineWidth = 2;
+            
+            // Draw a high-tech diamond/hexagon styled socket for the token icon
+            ctx.beginPath();
+            ctx.moveTo(pad + 12, y - 10);
+            ctx.lineTo(pad + badgeSize + 12, y - 10);
+            ctx.lineTo(pad + badgeSize + 22, y + (badgeSize / 2) - 10);
+            ctx.lineTo(pad + badgeSize + 12, y + badgeSize - 10);
+            ctx.lineTo(pad + 12, y + badgeSize - 10);
+            ctx.lineTo(pad + 2, y + (badgeSize / 2) - 10);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Render the Big Emoji Symbol inside the center of the active token
+            ctx.font = `${20 + pulseRadius}px sans-serif`; // Gives the item a breathing pulse effect
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(s.ico, pad + (badgeSize / 2) + 12, y + (badgeSize / 2) - 10);
+
+            // Data descriptor tracking string text sat directly next to it
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 12px 'Impact', sans-serif";
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.fillText(s.txt, pad + badgeSize + 28, y + (badgeSize / 2) - 12);
+
+            ctx.fillStyle = s.cA;
+            ctx.font = "700 10px monospace";
+            ctx.fillText("ACTIVE PASSIVE", pad + badgeSize + 28, y + (badgeSize / 2) + 4);
+
+            ctx.restore();
+            y += 46;
         }
-    }
+    });
     ctx.restore();
 }
 
@@ -912,22 +1437,7 @@ class DrawGame {
             ctx.fillStyle = `rgba(255,255,255,${0.15 * pulse})`;
             ctx.fillRect(x, y, 2, 2);
         }
-
-        // drawFloatingIsland(canvasWidth * .28 + Math.sin(frameCount * .004) * 25, 170, 0.9);
-        // drawFloatingIsland(canvasWidth * .72 + Math.sin(frameCount * .005 + 2) * 18, 130, .7);
-
-        mountainOffset1 = (mountainOffset1 - .15) % 420;
-        mountainOffset2 -= 0.35;
-        mountainOffset3 -= 0.7;
-
-        if (mountainOffset1 <= -420) mountainOffset1 = 0;
-        if (mountainOffset2 <= -360) mountainOffset2 = 0;
-        if (mountainOffset3 <= -300) mountainOffset3 = 0;
-
         this.drawSunAndMoon();
-        // this.drawMountainLayer(lerpColor("#1a2340","#2d5da8",skyBrightness),270,90,420,mountainOffset1);
-        // this.drawMountainLayer(lerpColor("#243a63","#4474bf",skyBrightness),220,130,360,mountainOffset2);
-        // this.drawMountainLayer(lerpColor("#345387","#6fa2ea",skyBrightness),170,110,300,mountainOffset3);
 
         for (let i = 0; i < 25; i++) {
             const speed = 1 + Math.sin(i * 17.3) * 0.4 + 1.5;
@@ -1331,11 +1841,12 @@ function drawRainbowTrail() {
 }
 
 function activatePowerUp(type) {
-    let multiplier = 1;
+    if (typeof triggerScreenShake === "function") triggerScreenShake(12);
 
     switch(type) {
         case "shield":
             powerUpsState.shield = true;
+            powerUpTimers.shield = 15 * 60;
             break;
         case "magnet":
             powerUpsState.magnet = true;
@@ -1345,59 +1856,200 @@ function activatePowerUp(type) {
             powerUpsState.doubleScore = true;
             powerUpTimers.doubleScore = 10 * 60;
             break;
+        case "doubleCoin":
+            powerUpsState.doubleCoin = true;
+            powerUpTimers.doubleCoin = 15 * 60;
+            break;
         case "tinyBird":
             powerUpsState.tinyBird = true;
             powerUpTimers.tinyBird = 10 * 60;
-            multiplier = 0.9
-            birdScale = .55;
             break;
         case "slowMotion":
             powerUpsState.slowMotion = true;
             powerUpTimers.slowMotion = 12 * 60;
-            birdScale = 0.95
-            multiplier = .65;
             break;
         case "dash":
             powerUpsState.dash = true;
             powerUpTimers.dash = 8 * 60;
-            multiplier = 2;
             break;
         case "phoenix": 
             powerUpsState.phoenix = true; 
             break;
+        case "laser":
+            powerUpsState.laser = true;
+            powerUpTimers.laser = 8 * 60; // 6 seconds of pipe destruction
+            break;
+        case "gravityFlip":
+            powerUpsState.gravityFlip = true;
+            powerUpTimers.gravityFlip = 8 * 60; // 8 seconds of upside down flying
+            break;
+        case "shadowClone":
+            powerUpsState.shadowClone = true;
+            powerUpTimers.shadowClone = 12 * 60; // 12 seconds of invulnerable sidekick birds
+            // Instantiates clone helper tracking values
+            bird.clones = [
+                { yOffset: -50, phase: 0, alpha: 0 },
+                { yOffset: 50,  phase: Math.PI, alpha: 0 }
+            ];
+            break;
+        case "coinBlast":
+            if (typeof coins !== "undefined") {
+                coins.forEach(coin => {
+                    coin.speed = game_config.pipeSpeed * 3; // Speeds them up dramatically
+                    // Artificially trip distance triggers
+                    coin.angle = 0; 
+                });
+            }
+            // Triggers a custom screen notification without holding state
+            powerUpsState.coinBlast = true;
+            setTimeout(() => { powerUpsState.coinBlast = false; }, 1000);
+            break;
     }
-
-    gameSpeedMultiplier = multiplier || 1;
+    
+    evaluateGameSpeed();
 }
 
 function updatePowerUps() {
+    // Tick down active timers safely
     Object.keys(powerUpTimers).forEach(key => {
-        if(powerUpTimers[key] > 0) {
+        if (powerUpTimers[key] > 0) {
             powerUpTimers[key] -= 1;
-            if (powerUpTimers[key] == 0) {
-                powerUpsState[key] = false;
+            
+            // FIX 1: Trigger expiration exactly when the frame countdown hits 0
+            if (powerUpTimers[key] === 0) {
+                powerUpsState[key] = false; // Turn state flag off completely
+                
+                // Specific cleanup for Gravity Flip
+                if (key === "gravityFlip" && bird.gravity < 0) {
+                    bird.gravity = Math.abs(bird.gravity);
+                }
+
+                // FIX 2: Specific absolute cleanup for Shadow Clones to make them disappear
+                if (key === "shadowClone") {
+                    delete bird.clones; // Completely deletes the array so drawing stops immediately
+                }
             }
         }
     });
-    if(!powerUpsState.tinyBird){
-        birdScale = 1;
+
+    // Handle Size scaling priorities cleanly
+    if (powerUpsState.tinyBird) {
+        birdScale = 0.55;
+    } else if (powerUpsState.slowMotion) {
+        birdScale = 0.95;
+    } else {
+        birdScale = 1.0;
     }
 
-    if (powerUpsState.dash) {
-        bird.x = canvasWidth * .275;
-    } else {
-        bird.x = canvasWidth * .22;
+    // Dynamic horizontal positional easing
+    const targetX = powerUpsState.dash ? canvasWidth * 0.275 : canvasWidth * 0.22;
+    bird.x += (targetX - bird.x) * 0.1;
+
+    // LASER PHYSICS & OBSTACLE VAPORIZATION LOOP
+    if (powerUpsState.laser && typeof pipes !== "undefined") {
+        pipes.forEach(pipe => {
+            // Target checks active pipes floating inside the projection path forward
+            if (!pipe.passed && pipe.x > bird.x && pipe.x < bird.x + 350) {
+                if (typeof screenShake === "function") screenShake(5);
+                if (typeof particles !== "undefined") {
+                    for (let i = 0; i < 8; i++) {
+                        particles.push({
+                            x: pipe.x + (Math.random() - 0.5) * (pipe.width || 40),
+                            y: bird.y + (Math.random() - 0.5) * 30,
+                            vx: (Math.random() - 0.5) * 4 - 2,
+                            vy: (Math.random() - 0.5) * 6 - 2,
+                            size: Math.random() * 5 + 3,
+                            life: 40,
+                            maxLife: 40,
+                            color: Math.random() < 0.5 ? "#ff5500" : "#ffaa00",
+                            update: function() {
+                                this.x += this.vx; this.y += this.vy;
+                                this.life--;
+                            },
+                            draw: function() {
+                                ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+                                ctx.globalAlpha = this.life / this.maxLife;
+                                ctx.fillStyle = this.color;
+                                // Draw a jagged burning shard instead of a clean circle
+                                ctx.fillRect(this.x, this.y, this.size, this.size);
+                                ctx.restore();
+                            }
+                        });
+                    }
+                }
+
+                // Vaporize obstacle and register score points cleanly
+                pipe.x = -600; 
+                pipe.passed = true; 
+                score += 1; 
+                bestScore = Math.max(bestScore, score);
+                if (typeof updateHud === "function") updateHud();
+            }
+        });
     }
-    gameSpeedMultiplier = powerUpsState.dash? 2 : powerUpsState.slowMotion ? 0.65 : 1;
+
+    // CLONE FUNCTIONAL MECHANICS (FIXED EXPIRATION)
+    if (powerUpsState.shadowClone && powerUpTimers.shadowClone > 0 && bird.clones) {
+        bird.clones.forEach(clone => {
+            clone.phase += 0.08; 
+            clone.alpha = Math.min(0.6, clone.alpha + 0.05);
+
+            const cloneWave = Math.sin(clone.phase) * 8;
+            const globalCloneX = bird.x - 25;
+            const globalCloneY = bird.y + clone.yOffset + cloneWave;
+
+            if (typeof coins !== "undefined") {
+                coins.forEach(coin => {
+                    if (!coin.collected) {
+                        const dx = globalCloneX - coin.x;
+                        const dy = globalCloneY - coin.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+
+                        if (dist < 140) { // Attraction zone radius
+                            const pull = (140 - dist) * 0.08;
+                            coin.x += (dx / dist) * pull;
+                            coin.y += (dy / dist) * pull;
+
+                            // Direct contact capture check
+                            const collectDist = game_config.birdRadius + 12;
+                            if (dist < collectDist) {
+                                coin.collected = true;
+                                coinCount += powerUpsState.doubleCoin ? 2 : 1;
+                                if (typeof createCoinExplosion === "function") createCoinExplosion(coin.x, coin.y);
+                                if (typeof screenShake === "function") screenShake(2);
+                                if (typeof updateHud === "function") updateHud();
+                                if (typeof saveStoredStats === "function") saveStoredStats();
+                            }
+                        }
+                    }
+                });
+            }
+        });
+    }
+    evaluateGameSpeed();
 }
 
-function revivePlayer(){
+function evaluateGameSpeed() {
+    if (powerUpsState.dash) {
+        gameSpeedMultiplier = 2.0;
+    } else if (powerUpsState.slowMotion) {
+        gameSpeedMultiplier = 0.55;
+    } else {
+        gameSpeedMultiplier = 1.0;
+    }
+}
+
+function revivePlayer() {
     powerUpsState.phoenix = false;
     bird.y = canvasHeight / 2;
     bird.velocity = 0;
-    bird.jump();
-    bird.x = canvasWidth * .22;
-    pipes = pipes.filter(pipe => pipe.x > bird.x + 200);
+    bird.x = canvasWidth * 0.22;
+    
+    if (typeof bird.jump === "function") bird.jump();
+    if (typeof screenShake === "function") screenShake(25); // Huge blast wave effect
+
+    // Vaporize obstacles instantly within proximity zones to clear path safely
+    pipes = pipes.filter(pipe => pipe.x > bird.x + 220);
     bushes = bushes.filter(bush => bush.x > bird.x + 180);
     coins = coins.filter(coin => coin.x > bird.x + 120);
     powerUps = powerUps.filter(p => p.x > bird.x + 120);
@@ -1489,6 +2141,7 @@ function initGame({ jumpImmediately = true } = {}) {
     lastTreeTime = 0;
     lastBushTime = 0;
     lastPowerUpTime = 0;
+    scoreEl.textContent = 0;
 
     gameState = Game_State.running;
     updateHud();
@@ -1525,8 +2178,11 @@ function endGame() {
 }
 
 function gameLoop(timestamp) {
+    const gameRenderer = new DrawGame();
     try {
         ctx.save();
+        // Handle first frame initialization cleanly
+        if (!lastFrameTime) lastFrameTime = timestamp;
         const dt = Math.min(timestamp - lastFrameTime, 32);
         lastFrameTime = timestamp;
 
@@ -1536,17 +2192,26 @@ function gameLoop(timestamp) {
                 break;
 
             case Game_State.running:
-                const renderer = new DrawGame();
                 frameCount += 1;
                 ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-                renderer.drawBackground();
-                drawGround();
                 updateWorldTime(dt);
+                if (typeof gameRenderer.drawBackground === "function") {
+                    gameRenderer.drawBackground();
+                }
+                drawGround();
                 updateGameObjects(dt);
-                drawPowerUps();
                 updatePowerUps();
+                spawnObjects();
+
+                pipes = pipes.filter(pipe => pipe.x + pipe.width > -20);
+                coins = coins.filter(coin => !coin.isDead && coin.x > -50);
+                bushes = bushes.filter(bush => bush.x + bush.width > -20);
+                powerUps = powerUps.filter(pu => !pu.isDead && pu.x + pu.size > -20);
+                particles = particles.filter(p => p.life > 0);
+                trees = trees.filter(tree => tree.x + 80 > -20);
 
                 trees.forEach(tree => tree.draw());
+
                 bushes.forEach(bush => {
                     bush.draw();
                     if (bush.collidesWith(bird)) {
@@ -1560,13 +2225,12 @@ function gameLoop(timestamp) {
                 pipes.forEach(pipe => {
                     pipe.draw();
                     if (!pipe.passed && pipe.x + pipe.width < bird.x) {
-                        score += powerUpsState.doubleScore? 2 : 1;
+                        score += powerUpsState.doubleScore ? 2 : 1;
                         pipe.passed = true;
                         bestScore = Math.max(bestScore, score);
                         updateHud();
                         saveStoredStats();
                     }
-
                     if (pipe.collidesWith(bird)) {
                         screenShake(18);
                         hitPlayer();
@@ -1577,7 +2241,7 @@ function gameLoop(timestamp) {
                     coin.draw();
                     if (!coin.collected && coin.collidesWith(bird)) {
                         coin.collected = true;
-                        coinCount += 1;
+                        coinCount += powerUpsState.doubleCoin ? 2 : 1;
                         createCoinExplosion(coin.x, coin.y);
                         screenShake(6);
                         updateHud();
@@ -1593,30 +2257,26 @@ function gameLoop(timestamp) {
                         updateHud();
                     }
                 });
-                bird.draw();
+
+                drawDashTrail();
+                drawRainbowTrail();
                 
                 particles.forEach(p => {
                     p.update(); 
                     p.draw();
                 });
 
-                drawDashTrail();
-                drawRainbowTrail();
-                spawnObjects();
-
-                pipes = pipes.filter(pipe => pipe.x + pipe.width > -pipe.width - 2);
-                coins = coins.filter(coin => !coin.collected && coin.x + coin.size > -20);
-                bushes = bushes.filter(bush => bush.x + bush.width > -20);
-                powerUps = powerUps.filter(pu => !pu.collected && pu.x + pu.size > -20);
-                particles = particles.filter(p => p.life > 0);
-                trees = trees.filter(tree => tree.x + 80 > -20);
+                // 6. Render Active Player & Overlays
+                bird.draw(); 
+                drawPowerUpMeters();
 
                 if (flashTimer > 0) {
                     flashTimer -= 1;
                     if (flashTimer <= 0) {
                         hitFlash.classList.remove('active');
                     }
-                }
+                }        
+
                 animationFrameId = requestAnimationFrame(gameLoop);
                 break;
 
@@ -1634,7 +2294,7 @@ function gameLoop(timestamp) {
                 break;
         }
     } catch(error) {
-        console.error('Error:', error);
+        console.error('Error in game loop:', error);
     } finally {
         ctx.restore();
     }
