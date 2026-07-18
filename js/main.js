@@ -40,8 +40,7 @@ let pipes, clouds, stars, trees, bushes, coins, particles, powerUps;
 
 let frameCount;
 let score;
-let coinCount = 0;
-let bestScore = 0;
+let coinCount = 0, bestScore = 0;
 
 let lastPipeTime = 0, lastCoinTime = 0, lastTreeTime = 0, lastBushTime = 0, lastPowerUpTime = 0;
 
@@ -61,8 +60,8 @@ const Game_State = {
 };
 
 const Spawn_Rates = {
-    pipeSpawnRate: 80,
-    coinSpawnRate: 90,
+    pipeSpawnRate: 75,
+    coinSpawnRate: 55,
     treeSpawnRate: 20
 }
 
@@ -101,62 +100,93 @@ let gameSpeedMultiplier = 1;
 let dashTrail = [];
 
 // Object pools for performance
-const pipePool = [];
-const coinPool = [];
-const bushPool = [];
-const powerUpPool = [];
+const pipePool = [], coinPool = [], bushPool = [], powerUpPool = [];
+
+let statsCache = { bestScore: 0, coinCount: 0 };
+let isCacheLoaded = false;
 
 function loadStoredStats() {
+    if (isCacheLoaded) return;
     try {
         const stored = localStorage.getItem(STORAGE_KEY);
-        if (!stored) return;
+        if (!stored) {
+            isCacheLoaded = true;
+            return;
+        }
 
         const parsed = JSON.parse(stored);
-        if (typeof parsed?.bestScore === 'number' && Number.isFinite(parsed.bestScore)) {
-            bestScore = parsed.bestScore;
-        }
-        if (typeof parsed?.coinCount === 'number' && Number.isFinite(parsed.coinCount)) {
-            coinCount = parsed.coinCount;
+        if (parsed && typeof parsed === 'object') {
+            if (typeof parsed.bestScore === 'number' && Number.isFinite(parsed.bestScore)) {
+                bestScore = parsed.bestScore;
+                statsCache.bestScore = bestScore;
+            }
+            if (typeof parsed.coinCount === 'number' && Number.isFinite(parsed.coinCount)) {
+                coinCount = parsed.coinCount;
+                statsCache.coinCount = coinCount;
+            }
+            isCacheLoaded = true;
         }
     } catch (error) {
-        console.warn('Unable to load saved stats', error);
+        console.warn('Unable to load saved stats safely, resetting cache:', error);
+        statsCache.bestScore = typeof bestScore === 'number' ? bestScore : 0;
+        statsCache.coinCount = typeof coinCount === 'number' ? coinCount : 0;
     }
 }
 
 function saveStoredStats() {
-    try {        
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ 
-            bestScore, 
-            coinCount
-        }));
+    try {
+        if (bestScore === statsCache.bestScore && coinCount === statsCache.coinCount) {
+            return; 
+        }
+        statsCache.bestScore = bestScore;
+        statsCache.coinCount = coinCount;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(statsCache));
     } catch (error) {
-        console.warn('Unable to save stats', error);
+        console.warn('Unable to write data payload onto local storage drive:', error);
     }
 }
 
 function hitPlayer() {
     if (powerUpsState.dash) {
-        if (bird.y + game_config.birdRadius >= canvasHeight - game_config.groundHeight) {
-            bird.jump();
+        // Safe tracking protection checks
+        const radius = (typeof game_config !== "undefined" && game_config.birdRadius) ? game_config.birdRadius : 24;
+        const groundH = (typeof game_config !== "undefined" && game_config.groundHeight) ? game_config.groundHeight : 100;
+        const currentHeight = (typeof canvasHeight !== "undefined") ? canvasHeight : 600;
+
+        if (bird && (bird.y + radius >= currentHeight - groundH)) {
+            if (typeof bird.jump === "function") bird.jump();
         }
         return;
     }
+
     if (powerUpsState.shield) {
-        triggerFlash();
+        if (typeof triggerFlash === "function") triggerFlash();
         setTimeout(() => {
             powerUpsState.shield = false;
-        }, 1500);
+        }, 1300);
+        if (typeof powerUpTimers !== "undefined") {
+            powerUpTimers.shield = 0; 
+        }
+        
+        if (typeof screenShake === "function") screenShake(8); // Juicy impact shake
         return;
     }
 
     if (powerUpsState.phoenix) {
-        revivePlayer();
+        if (typeof revivePlayer === "function") {
+            revivePlayer();
+        } else {
+            powerUpsState.phoenix = false;
+            gameState = Game_State.game_over;
+            if (typeof endGame === "function") endGame();
+        }
         return;
     }
 
     gameState = Game_State.game_over;
-    triggerFlash();
-    endGame();
+    if (typeof triggerFlash === "function") triggerFlash();
+    saveStoredStats(); 
+    if (typeof endGame === "function") endGame();
 }
 
 function resizeCanvas() {
@@ -496,124 +526,157 @@ class Bird {
 class Pipe {
     constructor() {
         this.width = 78;
-        this.x = canvasWidth + this.width;
-        this.top = 65 + Math.random() * 250;
-        this.bottom = this.top + game_config.pipeGap;
-        this.passed = false;
-        this.speed = game_config.pipeSpeed + Math.min(score * game_config.difficultyRamp, 1.2) * 0.5;
-        this.topHeight = this.top;
-        this.bottomY = this.bottom;
-        this.bottomHeight = canvasHeight - this.bottomY;
-        this.capHeight = 26; // Snug vertical balance
-        this.capOffset = 5;  // Slightly wider brim for cleaner contrast
+        // Safety Fallback Check for canvas size environments
+        const globalWidth = (typeof canvasWidth !== "undefined") ? canvasWidth : 800;
+        this.x = globalWidth + this.width;
         
-        // Internal pulse timing tracker for the animated glow streaks
-        this.glowPulse = Math.random() * Math.PI;
+        // Locked limits ensure calculations never output NaN or break bounds
+        this.top = 65 + Math.random() * 250;
+        
+        const gap = (typeof game_config !== "undefined" && game_config.pipeGap) ? game_config.pipeGap : 150;
+        this.bottom = this.top + gap;
+        
+        this.passed = false;
+        this.destroyed = false;      
+        this.shatterProgress = 0;    
+        
+        this.capHeight = 26; 
+        this.capOffset = 5;  
+
+        this.gradientStops = ['#1c9c34', '#28eb59', '#4eeb75', '#1bd148', '#0f7d2a'];
     }
 
     update(dt) {
-        const deltaTime = dt || 16.67;
-        const timeFactor = deltaTime / 16.67;
-        
-        this.x -= this.speed * gameSpeedMultiplier * timeFactor;
-        this.glowPulse += 0.05 * timeFactor; // Animates neon lights
+        try {
+            const deltaTime = dt || 16.67;
+            const timeFactor = deltaTime / 16.67;
+            
+            let baseSpeed = 3;
+            let ramp = 0.005;
+            if (typeof game_config !== "undefined") {
+                baseSpeed = game_config.pipeSpeed || baseSpeed;
+                ramp = game_config.difficultyRamp || ramp;
+            }
+            
+            const currentScore = (typeof score !== "undefined") ? score : 0;
+            const multiplier = (typeof gameSpeedMultiplier !== "undefined") ? gameSpeedMultiplier : 1.0;
+
+            const currentSpeed = baseSpeed + Math.min(currentScore * ramp, 1.2) * 0.5;
+            this.x -= currentSpeed * multiplier * timeFactor;
+
+            if (this.destroyed) {
+                this.shatterProgress += 0.05 * timeFactor;
+            }
+        } catch (e) {
+            console.warn("Pipe update validation anomaly recovered:", e);
+        }
     }
 
     draw() {
-        const colors = [
-            '#1c9c34', 
-            '#28eb59', 
-            '#4eeb75', 
-            '#1bd148', 
-            '#0f7d2a'
-        ];
-        ctx.save();
+        if (this.destroyed && this.shatterProgress >= 1.0) return;
+        try {
+            ctx.save();
+            ctx.shadowBlur = 0;
 
-        // 1. MAIN METALLIC GRADIENT CONFIGURATION
-        // Ensures your input colors look completely 3D by building a specular cylindrical sheen maps
-        const getPipeGradient = (startX, endX) => {
-            const grad = ctx.createLinearGradient(startX, 0, endX, 0);
-            grad.addColorStop(0.0, colors[0] || '#112233'); // Dark left edge
-            grad.addColorStop(0.2, colors[1] || '#224466'); // Base body
-            grad.addColorStop(0.5, colors[2] || '#44aaee'); // Specular center core highlight
-            grad.addColorStop(0.8, colors[3] || '#1c5588'); // Secondary midtone
-            grad.addColorStop(1.0, colors[4] || '#0b1b2b'); // Deep right shadow
-            return grad;
-        };
+            const buildGrad = (xStart, xEnd) => {
+                const grad = ctx.createLinearGradient(xStart, 0, xEnd, 0);
+                grad.addColorStop(0.0, this.gradientStops[0]);
+                grad.addColorStop(0.2, this.gradientStops[1]);
+                grad.addColorStop(0.5, this.gradientStops[2]); // Chrome sheen core center
+                grad.addColorStop(0.8, this.gradientStops[3]);
+                grad.addColorStop(1.0, this.gradientStops[4]);
+                return grad;
+            };
 
-        const pipeGrad = getPipeGradient(this.x, this.x + this.width);
-        const capGrad = getPipeGradient(this.x - this.capOffset, this.x + this.width + this.capOffset);
+            const pipeGrad = buildGrad(this.x, this.x + this.width);
+            const capGrad = buildGrad(this.x - this.capOffset, this.x + this.width + this.capOffset);
+            const capW = this.width + this.capOffset * 2;
+            
+            const displayHeight = (typeof canvasHeight !== "undefined") ? canvasHeight : 600;
+            const bHeight = displayHeight - this.bottom;
 
-        // 2. LAYER 1: AMBIENT OUTER BLUR GLOW
-        ctx.shadowColor = 'rgba(69, 118, 255, 0.5)';
-        ctx.shadowBlur = 18;
+            // ENGINE PATH A: INTACT SOLID CYLINDERS
+            if (!this.destroyed) {
+                ctx.fillStyle = pipeGrad;
+                ctx.fillRect(this.x, 0, this.width, this.top - this.capHeight);
+                ctx.fillRect(this.x, this.bottom + this.capHeight, this.width, bHeight - this.capHeight);
 
-        // 3. LAYER 2: SHARP STROKING AND BASE STRUCTURAL FILLS
-        // Top Main Body
-        ctx.fillStyle = pipeGrad;
-        ctx.fillRect(this.x, 0, this.width, this.topHeight - this.capHeight);
-        
-        // Bottom Main Body
-        ctx.fillRect(this.x, this.bottomY + this.capHeight, this.width, this.bottomHeight - this.capHeight);
+                ctx.fillStyle = capGrad;
+                ctx.fillRect(this.x - this.capOffset, this.top - this.capHeight, capW, this.capHeight);
+                ctx.fillRect(this.x - this.capOffset, this.bottom, capW, this.capHeight);
 
-        // Render Flanged Rim Caps
-        ctx.fillStyle = capGrad;
-        ctx.fillRect(this.x - this.capOffset, this.topHeight - this.capHeight, this.width + this.capOffset * 2, this.capHeight);
-        ctx.fillRect(this.x - this.capOffset, this.bottomY, this.width + this.capOffset * 2, this.capHeight);
+                // Deep crease shadow lines (Shining strip layers fully removed)
+                ctx.fillStyle = '#050d14';
+                ctx.fillRect(this.x - this.capOffset, this.top - 4, capW, 4);
+                ctx.fillRect(this.x - this.capOffset, this.bottom, capW, 4);
 
-        // Clear glows immediately so internal geometry doesn't turn muddy
-        ctx.shadowBlur = 0; 
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                ctx.fillRect(this.x, this.top, this.width, 8);
+                ctx.fillRect(this.x, this.bottom + this.capHeight, this.width, 8);
 
-        // 4. LAYER 3: ADVANCED STRUCTURAL INNER DEPTH SHADOWS
-        // Inner Lip Crease Shadows (112b41)
-        ctx.fillStyle = '#050d14';
-        ctx.fillRect(this.x - this.capOffset, this.topHeight - 4, this.width + this.capOffset * 2, 4);
-        ctx.fillRect(this.x - this.capOffset, this.bottomY, this.width + this.capOffset * 2, 4);
+                // Geometric outer line tracing overlays
+                ctx.strokeStyle = '#050d14';
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.rect(this.x, -5, this.width, this.top - this.capHeight + 5);
+                ctx.rect(this.x, this.bottom + this.capHeight, this.width, bHeight + 5);
+                ctx.stroke();
 
-        // Drop shadow UNDER the caps looking down/up onto long shafts
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-        ctx.fillRect(this.x, this.topHeight, this.width, 8);
-        ctx.fillRect(this.x, this.bottomY + this.capHeight, this.width, 8);
+                ctx.beginPath();
+                ctx.rect(this.x - this.capOffset, this.top - this.capHeight, capW, this.capHeight);
+                ctx.rect(this.x - this.capOffset, this.bottom, capW, this.capHeight);
+                ctx.stroke();
+            } 
+            // ENGINE PATH B: FRACTIONAL EXPLOSION MATRIX
+            else {
+                const ease = this.shatterProgress;
+                ctx.globalAlpha = Math.max(0, 1 - ease); 
+                ctx.fillStyle = pipeGrad;
+                ctx.strokeStyle = '#050d14';
+                ctx.lineWidth = 2;
 
-        // 5. LAYER 4: ANIME STYLE CHROME GLOW STRIPS (DYNAMIC NEON RECTANGLES)
-        const pulseWidth = 2 + Math.sin(this.glowPulse) * 1.5;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-        
-        // Vertical sheen streak running through both pipes symmetrically
-        const stripX = this.x + this.width * 0.35;
-        ctx.fillRect(stripX, 0, pulseWidth, this.topHeight - this.capHeight);
-        ctx.fillRect(stripX, this.bottomY + this.capHeight, pulseWidth, this.bottomHeight - this.capHeight);
+                const push = ease * 120; // Shatter translation modifier
 
-        // Horizontal accent line details embedded directly on cap rims
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-        ctx.fillRect(this.x - this.capOffset + 4, this.topHeight - this.capHeight + 4, this.width + (this.capOffset * 2) - 8, 2);
-        ctx.fillRect(this.x - this.capOffset + 4, this.bottomY + this.capHeight - 6, this.width + (this.capOffset * 2) - 8, 2);
+                // Top Fragment Shards
+                ctx.fillRect(this.x - push * 0.4, -push * 0.2, this.width * 0.5, this.top * 0.5);
+                ctx.strokeRect(this.x - push * 0.4, -push * 0.2, this.width * 0.5, this.top * 0.5);
 
-        // 6. LAYER 5: VECTOR STROKE WRAPPING (CLEANS UP OVERLAPS)
-        ctx.strokeStyle = '#050d14';
-        ctx.lineWidth = 2.5;
+                ctx.fillRect(this.x + this.width * 0.5 + push * 0.5, -push * 0.4, this.width * 0.5, this.top * 0.7);
+                ctx.strokeRect(this.x + this.width * 0.5 + push * 0.5, this.width * 0.5, this.top * 0.7);
 
-        // Draw Shaft Outlines
-        ctx.beginPath();
-        ctx.rect(this.x, -10, this.width, this.topHeight - this.capHeight + 10);
-        ctx.rect(this.x, this.bottomY + this.capHeight, this.width, this.bottomHeight + 10);
-        ctx.stroke();
+                // Bottom Fragment Shards
+                ctx.fillRect(this.x - push * 0.6, this.bottom + push * 0.5, this.width * 0.4, bHeight * 0.6);
+                ctx.strokeRect(this.x - push * 0.6, this.bottom + push * 0.5, this.width * 0.4, bHeight * 0.6);
 
-        // Draw Cap Outlines
-        ctx.beginPath();
-        ctx.rect(this.x - this.capOffset, this.topHeight - this.capHeight, this.width + this.capOffset * 2, this.capHeight);
-        ctx.rect(this.x - this.capOffset, this.bottomY, this.width + this.capOffset * 2, this.capHeight);
-        ctx.stroke();
-
-        ctx.restore();
+                ctx.fillRect(this.x + this.width * 0.4 + push * 0.4, this.bottom + push * 0.3, this.width * 0.6, bHeight * 0.4);
+                ctx.strokeRect(this.x + this.width * 0.4 + push * 0.4, this.bottom + push * 0.3, this.width * 0.6, bHeight * 0.4);
+            }
+        } catch (drawError) {
+            console.error("Critical rendering failure recovered seamlessly:", drawError);
+        } finally {
+            ctx.restore();
+        }
     }
 
     collidesWith(bird) {
-        const b = bird.getBounds();
-        const hitX = b.right > this.x && b.left < this.x + this.width;
-        const hitTop = b.top < this.top;
-        const hitBottom = b.bottom > this.bottom;
-        return hitX && (hitTop || hitBottom);
+        if (this.destroyed || !bird) return false;
+        try {
+            if (typeof bird.getBounds === "function") {
+                const b = bird.getBounds();
+                if (b && typeof b.right === "number") {
+                    return b.right > this.x && b.left < this.x + this.width && (b.top < this.top || b.bottom > this.bottom);
+                }
+            }
+            
+            const actualScale = (typeof birdScale !== "undefined") ? birdScale : 1.0;
+            const baseRad = (typeof game_config !== "undefined" && game_config.birdRadius) ? game_config.birdRadius : 24;
+            const br = baseRad * actualScale;
+            
+            return (bird.x + br) > this.x && (bird.x - br) < this.x + this.width && ((bird.y - br) < this.top || (bird.y + br) > this.bottom);
+        } catch (collisionError) {
+            console.warn("Collision handling matrix bypass invoked:", collisionError);
+            return false;
+        }
     }
 }
 
@@ -647,16 +710,13 @@ class Coin {
     }
 
     draw() {
-        // Stop drawing entirely once the floating text fades out
         if (this.collected && this.textAlpha <= 0) return;
-
         ctx.save();
 
         if (!this.collected) {
-            // --- DRAW THE GOLD SPINNING COIN ---
+            ctx.shadowBlur = 0;
             ctx.translate(this.x, this.y);
             
-            // Calculate a true 3D horizontal flip scale matrix
             const currentScaleX = Math.cos(this.angle);
             ctx.scale(Math.abs(currentScaleX), 1);
 
@@ -665,30 +725,25 @@ class Coin {
             const coinGold = isFront ? '#ffd22e' : '#e6b61f';
             const edgeCopper = isFront ? '#ff7220' : '#d45611';
 
-            // Layer 1: Enhanced Golden Radial Ambient Glow
             ctx.shadowColor = 'rgba(255, 210, 46, 0.6)';
             ctx.shadowBlur = 15;
 
-            // Layer 2: Main Coin Body Solid Fill
             ctx.fillStyle = coinGold;
             ctx.beginPath();
             ctx.arc(0, 0, this.size / 2, 0, Math.PI * 2);
             ctx.fill();
 
-            // Layer 3: Thick Premium Outer Rim
             ctx.shadowBlur = 0; // Clear shadow for crisp line work
             ctx.strokeStyle = edgeCopper;
             ctx.lineWidth = 2.5;
             ctx.stroke();
 
-            // Layer 4: Delicate Inset Detail Ring
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.arc(0, 0, (this.size / 2) - 3, 0, Math.PI * 2);
             ctx.stroke();
 
-            // Layer 5: Embossed "$" Currency Symbol
             ctx.fillStyle = edgeCopper;
             ctx.font = `bold ${this.size * 0.6}px Arial`;
             ctx.textAlign = "center";
@@ -945,55 +1000,59 @@ class PowerUp {
 class Tree {
     constructor() {
         this.scale = 0.7 + Math.random() * 0.7;
-        this.y = canvasHeight - game_config.groundHeight + Math.min(Math.random() * 15, 15) - this.scale;
-        this.x = canvasWidth + 40;
-        this.speed = game_config.treeSpeed - (this.scale / 3.5) + Math.min(score * game_config.difficultyRamp, 1.2);
+        
+        // Safety Fallback Guarding for global game metrics
+        const groundH = (typeof game_config !== "undefined") ? game_config.groundHeight : 100;
+        const curHeight = (typeof canvasHeight !== "undefined") ? canvasHeight : 600;
+        const curWidth = (typeof canvasWidth !== "undefined") ? canvasWidth : 800;
+        const baseSpeed = (typeof game_config !== "undefined") ? game_config.treeSpeed : 2.5;
+        const ramp = (typeof game_config !== "undefined") ? game_config.difficultyRamp : 0.05;
+        const curScore = (typeof score === "number") ? score : 0;
+
+        this.y = curHeight - groundH + Math.min(Math.random() * 15, 15) - this.scale;
+        this.x = curWidth + 60; // Extra buffer room to spawn smoothly off-screen
+        
+        this.speed = baseSpeed - (this.scale / 3.5) + Math.min(curScore * ramp, 1.2);
+        this.width = 70 * this.scale; 
     }
 
     update(dt) {
-        this.x -= this.speed * gameSpeedMultiplier * (dt / 16.67);
+        const deltaTime = dt || 16.67;
+        const speedMult = (typeof gameSpeedMultiplier === "number") ? gameSpeedMultiplier : 1.0;
+        this.x -= this.speed * speedMult * (deltaTime / 16.67);
     }
 
     draw() {
         ctx.save();
         ctx.translate(this.x, this.y);
-        ctx.scale(this.scale, this.scale);
+        ctx.scale(this.scale, this.scale); 
+        ctx.shadowBlur = 0;
 
+        // Trunk Layer
         ctx.fillStyle = '#5c3a21';
         ctx.beginPath();
-        ctx.moveTo(-6, -25);
-        ctx.lineTo(6, -25);
-        ctx.lineTo(8, 0);
-        ctx.quadraticCurveTo(12, 0, 14, 2);
-        ctx.lineTo(-14, 2);
+        ctx.moveTo(-6, -25); ctx.lineTo(6, -25); ctx.lineTo(8, 0);
+        ctx.quadraticCurveTo(12, 0, 14, 2); ctx.lineTo(-14, 2);
         ctx.quadraticCurveTo(-12, 0, -8, 0);
-        ctx.closePath();
-        ctx.fill();
+        ctx.closePath(); ctx.fill();
 
-        // Bottom
+        // Bottom Leaves Layer
         ctx.fillStyle = '#143d31';
         ctx.beginPath();
-        ctx.moveTo(-35, -20);
-        ctx.quadraticCurveTo(0, -14, 35, -20);
-        ctx.lineTo(0, -55);
-        ctx.closePath();
-        ctx.fill();
-        // Middle
+        ctx.moveTo(-35, -20); ctx.quadraticCurveTo(0, -14, 35, -20); ctx.lineTo(0, -55);
+        ctx.closePath(); ctx.fill();
+        
+        // Middle Leaves Layer
         ctx.fillStyle = '#1b5e43';
         ctx.beginPath();
-        ctx.moveTo(-28, -45);
-        ctx.quadraticCurveTo(0, -39, 28, -45);
-        ctx.lineTo(0, -80);
-        ctx.closePath();
-        ctx.fill();
-        // Top
+        ctx.moveTo(-28, -45); ctx.quadraticCurveTo(0, -39, 28, -45); ctx.lineTo(0, -80);
+        ctx.closePath(); ctx.fill();
+        
+        // Top Leaves Layer
         ctx.fillStyle = '#227d58';
         ctx.beginPath();
-        ctx.moveTo(-20, -68);
-        ctx.quadraticCurveTo(0, -63, 20, -68);
-        ctx.lineTo(0, -102);
-        ctx.closePath();
-        ctx.fill();
+        ctx.moveTo(-20, -68); ctx.quadraticCurveTo(0, -63, 20, -68); ctx.lineTo(0, -102);
+        ctx.closePath(); ctx.fill();
 
         ctx.restore();
     }
@@ -1002,42 +1061,52 @@ class Tree {
 class Bush {
     constructor() {
         this.scale = 0.8 + Math.random() * 0.5;
-        this.y = canvasHeight - game_config.groundHeight + Math.min(Math.random() * 15, 15) - this.scale;
-        this.x = canvasWidth + 20;
-        this.speed = game_config.treeSpeed + Math.min(score * game_config.difficultyRamp, 1.0);
+        
+        const groundH = (typeof game_config !== "undefined") ? game_config.groundHeight : 100;
+        const curHeight = (typeof canvasHeight !== "undefined") ? canvasHeight : 600;
+        const curWidth = (typeof canvasWidth !== "undefined") ? canvasWidth : 800;
+        const baseSpeed = (typeof game_config !== "undefined") ? game_config.treeSpeed : 2.5;
+        const ramp = (typeof game_config !== "undefined") ? game_config.difficultyRamp : 0.05;
+        const curScore = (typeof score === "number") ? score : 0;
+
+        this.y = curHeight - groundH + Math.min(Math.random() * 15, 15) - this.scale;
+        this.x = curWidth + 40;
+        this.speed = baseSpeed + Math.min(curScore * ramp, 1.0);
+        
         this.width = 40 * this.scale;
         this.height = 20 * this.scale;
     }
 
     update(dt) {
-        this.x -= this.speed * gameSpeedMultiplier * (dt / 16.67);
+        const deltaTime = dt || 16.67;
+        const speedMult = (typeof gameSpeedMultiplier === "number") ? gameSpeedMultiplier : 1.0;
+        this.x -= this.speed * speedMult * (deltaTime / 16.67);
     }
 
     draw() {
         ctx.save();
         ctx.translate(this.x, this.y);
         ctx.scale(this.scale, this.scale);
-        ctx.shadowColor = 'rgba(47, 126, 47, 0.64)';
-        ctx.shadowBlur = 15;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 12;
+        
+        ctx.fillStyle = 'rgba(15, 45, 20, 0.4)'; // Vector ground shadow representation
+        ctx.beginPath();
+        ctx.ellipse(0, 4, 22, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Main Bush Cluster Fills
         ctx.fillStyle = '#2a6e3a';
         ctx.beginPath();
         ctx.moveTo(-20, -15);
         ctx.quadraticCurveTo(-10, -25, 0, -20);
         ctx.quadraticCurveTo(10, -25, 20, -15);
-        ctx.lineTo(20, 5);
-        ctx.lineTo(-20, 5);
-        ctx.closePath();
-        ctx.fill();
+        ctx.lineTo(20, 5); ctx.lineTo(-20, 5);
+        ctx.closePath(); ctx.fill();
         
+        // Layered Anime Style Inner Depth Textures
         ctx.fillStyle = '#1e5a2f';
         ctx.beginPath();
-        ctx.moveTo(-12, -10);
         ctx.arc(-8, -8, 5, 0, Math.PI * 2);
-        ctx.moveTo(0, -15);
         ctx.arc(4, -12, 6, 0, Math.PI * 2);
-        ctx.moveTo(12, -10);
         ctx.arc(8, -8, 5, 0, Math.PI * 2);
         ctx.fill();
         
@@ -1045,11 +1114,19 @@ class Bush {
     }
 
     collidesWith(bird) {
-        const bx = this.x + this.width / 2;
+        if (!bird) return false;
+        // Fast square distance fallback lookup configurations
+        const actualScale = (typeof birdScale !== "undefined") ? birdScale : 1.0;
+        const baseRadius = (typeof game_config !== "undefined") ? game_config.birdRadius : 24;
+        const br = baseRadius * actualScale;
+        
+        const bx = this.x + (this.width / 2);
         const by = this.y;
         const dx = bird.x - bx;
         const dy = bird.y - by;
-        return dx*dx+dy*dy < (game_config.birdRadius + 20) * (game_config.birdRadius + 20);
+        
+        const checkRange = br + 20;
+        return (dx * dx + dy * dy) < (checkRange * checkRange);
     }
 }
 
@@ -1074,7 +1151,11 @@ class Cloud {
     }
 
     draw() {
+        if (!PIE_2) {
+            const PIE_2 = Math.PI * 2;
+        }
         ctx.save();
+        ctx.shadowBlur = 0;
         ctx.translate(this.x,this.y);
         ctx.scale(this.scale,this.scale);
         const g = ctx.createRadialGradient(25, 10, 5, 25, 10, 70);
@@ -1083,11 +1164,15 @@ class Cloud {
         g.addColorStop(1, lerpColor('rgb(255, 255, 255)', 'rgb(134, 162, 197)',  0.18, skyBrightness, 'oklab'));
         ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(-2,5,26,0,PIE_2);
-        ctx.arc(19,-5,28,0,PIE_2);
-        ctx.arc(49,-3,26,0,PIE_2);
-        ctx.arc(73,7,28,0,PIE_2);
-        ctx.arc(35,18,30,0,PIE_2);
+        ctx.arc(-4,5,26,0, PIE_2);
+        ctx.arc(19,-5,28,0, PIE_2);
+        ctx.arc(50,-3,27,0, PIE_2);
+        ctx.arc(74,7,28,0, PIE_2);
+        ctx.arc(35,15,33,0, PIE_2);
+        ctx.shadowColor = 'rgba(255, 255, 255, 0.7)';
+        ctx.shadowBlur = 16;
+        ctx.shadowOffsetX = 3;
+        ctx.shadowOffsetY = 5;
         ctx.fill();
         ctx.restore();
     }
@@ -1190,28 +1275,37 @@ class Particle {
 }
 
 function createCoinExplosion(x, y) {
+    if (!particles) return;
+    if (!PIE_2) {
+        const PIE_2 = Math.PI * 2;
+    }
+    const colorA = "#FFD93D", colorB = "#FFF8A5";
+
     for (let i = 0; i < 25; i++) {
         const angle = Math.random() * PIE_2;
         const speed = 2 + Math.random() * 5;
+        
+        // Caching pre-calculated velocity parameters inside local registers
+        const vx = Math.cos(angle) * speed;
+        const vy = Math.sin(angle) * speed;
+        const particleColor = Math.random() > 0.5 ? colorA : colorB;
+        const size = 2 + Math.random() * 4;
+        const life = 35 + Math.random() * 25;
+
+        // Pushes pre-calculated data points into the array instantly
         particles.push(
-            new Particle(
-                x,
-                y,
-                Math.random() > .5 ? "#FFD93D" : "#FFF8A5",
-                2 + Math.random() * 4,
-                Math.cos(angle) * speed,
-                Math.sin(angle) * speed,
-                35 + Math.random() * 25
-            )
+            new Particle(x, y, particleColor, size, vx, vy, life)
         );
     }
 }
 
 function drawPowerUpMeters() {
-    let y = 48; 
-    const w = 190, h = 16, pad = 15; // Balanced visual layout anchors
+    if (typeof gameState === "undefined" || gameState !== Game_State.running) return;
+    if (typeof powerUpTimers === "undefined" || typeof powerUpsState === "undefined") return;
 
-    // 🚀 STYLES CONFIG: Added 'isBar' flag to change layout style dynamically
+    let y = 48; 
+    const w = 190, h = 16, pad = 15; 
+
     const styles = {
         shield:      { txt: "SHIELD",      ico: "🛡️", cA: "#ff5ca8", cB: "#bc1360", max: 480, isBar: true },
         magnet:      { txt: "MAGNET",      ico: "🧲", cA: "#ff4040", cB: "#9e0c0c", max: 600, isBar: true },
@@ -1223,399 +1317,354 @@ function drawPowerUpMeters() {
         laser:       { txt: "OMEGA LASER", ico: "💥", cA: "#ff003c", cB: "#96001e", max: 360, isBar: true }, 
         gravityFlip: { txt: "GRAVITY FLIP",ico: "🔄", cA: "#00ffcc", cB: "#00997a", max: 480, isBar: true },
         shadowClone: { txt: "CLONE TEAM",  ico: "👥", cA: "#bd00ff", cB: "#630084", max: 720, isBar: true },
-        
-        // 🚀 NEW NON-BAR PASSIVES (Like your Phoenix revival state)
-        phoenix:     { txt: "PHOENIX REVIVE", ico: "🔥", cA: "#ff7b00", cB: "#963a00", max: 0,   isBar: false }
+        phoenix:     { txt: "PHOENIX CORE",ico: "🔥", cA: "#ff7b00", cB: "#963a00", max: 1,   isBar: false }
     };
 
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0); // Lock straight to absolute screen coordinates
-    ctx.shadowBlur = 0; // Hardware acceleration performance maintainer
+    try {
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0); // Lock directly to screen space bounds
+        ctx.shadowBlur = 0; // Lock hardware acceleration pipelines on
 
-    Object.keys(powerUpsState).forEach(key => {
-        const active = powerUpsState[key], s = styles[key];
-        if (!active || !s) return; // Skip if power-up isn't active or config doesn't exist
+        const fCount = (typeof frameCount === "number") ? frameCount : 0;
+        const activeStateKeys = Object.keys(powerUpsState);
 
-        const time = powerUpTimers[key] || 0;
-        const isLow = s.isBar && time < 120;
-        const fillW = s.isBar ? w * (time / s.max) : 0;
-        const flashCondition = isLow && (Math.floor(frameCount / 4) % 2 === 0);
-
-        // STYLE METHOD A: TIMED PROGRESS BAR LAYOUT (`isBar === true`)
-        if (s.isBar) {
-            if (time <= 0) return; // Hide bars if out of time frames
-            const secStr = `${(time / 60).toFixed(1)}s`;
-
-            ctx.textBaseline = "bottom";
-
-            // Oversized Icon
-            ctx.font = "22px sans-serif"; ctx.textAlign = "left";
-            ctx.fillText(s.ico, pad, y - 4);
-
-            // Label Text
-            ctx.fillStyle = "#ffffff";
-            ctx.font = "500 17px 'Impact', 'Arial Black', sans-serif";
-            ctx.letterSpacing = "2px";
-            ctx.fillText(s.txt, pad + 28, y - 6);
-
-            // Timer Clock Text
-            ctx.fillStyle = flashCondition ? "#ff333c" : s.cA;
-            ctx.font = "900 13px monospace"; ctx.textAlign = "right";
-            ctx.fillText(secStr, pad + w, y - 6);
-
-            // Slanted Track Backing
-            ctx.fillStyle = "rgba(4, 8, 18, 0.9)"; ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(pad, y); ctx.lineTo(pad + w, y);
-            ctx.lineTo(pad + w + 5, y + h); ctx.lineTo(pad + 5, y + h);
-            ctx.closePath(); ctx.fill(); ctx.stroke();
-
-            // Progress Fill
-            if (fillW > 2) {
-                ctx.save();
-                const grad = ctx.createLinearGradient(pad, 0, pad + w, 0);
-                grad.addColorStop(0, s.cB); grad.addColorStop(1, s.cA);
-                ctx.fillStyle = grad;
-
-                ctx.beginPath();
-                ctx.moveTo(pad, y); ctx.lineTo(pad + fillW, y);
-                ctx.lineTo(pad + 5 + fillW, y + h); ctx.lineTo(pad + 5, y + h);
-                ctx.closePath(); ctx.fill();
-
-                ctx.strokeStyle = flashCondition ? "#ff003c" : s.cA;
-                ctx.lineWidth = 1.5; ctx.stroke();
-                
-                // Tube shine lines
-                ctx.strokeStyle = "rgba(255, 255, 255, 0.3)"; ctx.lineWidth = 1;
-                ctx.beginPath(); ctx.moveTo(pad + 1, y + 2); ctx.lineTo(pad + fillW - 1, y + 2); ctx.stroke();
-                ctx.restore();
-            }
-
-            // Interface Frame Brackets
-            ctx.strokeStyle = flashCondition ? "#ff003c" : "rgba(255,255,255,0.2)";
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(pad - 6, y - 2); ctx.lineTo(pad - 6, y + h + 2); ctx.lineTo(pad, y + h + 2);
-            ctx.stroke();
-
-            y += 58; // Step height layout calculation down for next item
-        } 
-        
-        // STYLE METHOD B: INFINITE OR TOGGLE TOKEN BADGE (`isBar === false`)
-        else {
-            ctx.save();
-            const badgeSize = 32;
-            const pulseRadius = Math.sin(frameCount * 0.08) * 3;
-
-            // Ambient background token tray shape
-            ctx.fillStyle = "rgba(4, 8, 18, 0.85)";
-            ctx.strokeStyle = s.cA;
-            ctx.lineWidth = 2;
+        for (let i = 0; i < activeStateKeys.length; i++) {
+            const key = activeStateKeys[i];
+            if (!powerUpsState[key]) continue; 
             
-            // Draw a high-tech diamond/hexagon styled socket for the token icon
-            ctx.beginPath();
-            ctx.moveTo(pad + 12, y - 10);
-            ctx.lineTo(pad + badgeSize + 12, y - 10);
-            ctx.lineTo(pad + badgeSize + 22, y + (badgeSize / 2) - 10);
-            ctx.lineTo(pad + badgeSize + 12, y + badgeSize - 10);
-            ctx.lineTo(pad + 12, y + badgeSize - 10);
-            ctx.lineTo(pad + 2, y + (badgeSize / 2) - 10);
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
+            const s = styles[key];
+            if (!s) continue;
 
-            // Render the Big Emoji Symbol inside the center of the active token
-            ctx.font = `${20 + pulseRadius}px sans-serif`; // Gives the item a breathing pulse effect
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText(s.ico, pad + (badgeSize / 2) + 12, y + (badgeSize / 2) - 10);
+            const time = powerUpTimers[key] || 0;
+            const isLow = s.isBar && time < 120; // 120 frames = Under 2 seconds remaining
+            
+            // High-performance bitwise layout flashing calculation
+            const isFlashingFrame = isLow && ((fCount >> 2) & 1);
 
-            // Data descriptor tracking string text sat directly next to it
-            ctx.fillStyle = `rgb(195, 232, 241)`;
-            ctx.font = "500 17px 'Impact', 'Arial Black', sans-serif";
-            ctx.letterSpacing = "2px";
-            ctx.textAlign = "left";
-            ctx.textBaseline = "middle";
-            ctx.fillText(s.txt, pad + badgeSize + 28, y + (badgeSize / 2) - 12);
+            // STYLE PATH A: TIMED PROGRESS BAR LAYOUT (`isBar === true`)
+            if (s.isBar) {
+                if (time <= 0) continue; 
+                
+                const fillW = w * (time / s.max);
+                const secStr = (time / 60).toFixed(1) + "s"; 
 
-            ctx.fillStyle = s.cA;
-            ctx.font = "700 10px monospace";
-            ctx.fillText("ACTIVE PASSIVE", pad + badgeSize + 28, y + (badgeSize / 2) + 4);
+                ctx.textBaseline = "bottom";
 
-            ctx.restore();
-            y += 46;
+                // A. EXTRA VISIBLE DATA HEADERS (Drawn entirely above the bar area)
+                // Large Icon Symbol
+                ctx.font = "24px sans-serif"; 
+                ctx.textAlign = "left";
+                ctx.fillStyle = "#ffffff";
+                ctx.fillText(s.ico, pad, y - 4);
+
+                // Bold White Label Text
+                ctx.font = "bold 15px 'Impact', 'Arial Black', sans-serif";
+                ctx.letterSpacing = '0.8px';
+                ctx.fillText(s.txt, pad + 32, y - 6);
+
+                // High-Contrast Digital Timer (Turns red and flashes if low)
+                ctx.fillStyle = isFlashingFrame ? "#ff1a26" : s.cA;
+                ctx.font = "900 16px monospace"; 
+                ctx.textAlign = "right";
+                ctx.fillText(secStr, pad + w, y - 6);
+
+                // B. SLANTED TECH TRAY BACKGROUND
+                ctx.fillStyle = "rgba(5, 9, 20, 0.88)"; // Ultra deep glass tray provides solid backing contrast
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.16)"; 
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(pad, y); ctx.lineTo(pad + w, y);
+                ctx.lineTo(pad + w + 5, y + h); ctx.lineTo(pad + 5, y + h);
+                ctx.closePath(); ctx.fill(); ctx.stroke();
+
+                // C. 3-STAGE PLASMA FILL (With dynamic end-flicker alerts)
+                if (fillW > 2) {
+                    ctx.save();
+                    const grad = ctx.createLinearGradient(pad, 0, pad + w, 0);
+                    
+                    // 🚀 CRITICAL FLICKER: If time is low, swap the standard theme colors 
+                    // for an intense, flashing red emergency danger bar signature
+                    if (isFlashingFrame) {
+                        grad.addColorStop(0, "#7a0012");
+                        grad.addColorStop(1, "#ff1a35");
+                    } else {
+                        grad.addColorStop(0, s.cB); 
+                        grad.addColorStop(1, s.cA);
+                    }
+                    
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    ctx.moveTo(pad, y); ctx.lineTo(pad + fillW, y);
+                    ctx.lineTo(pad + 5 + fillW, y + h); ctx.lineTo(pad + 5, y + h);
+                    ctx.closePath(); ctx.fill();
+
+                    // Crisp wireframe outline tracking line matches the warning state
+                    ctx.strokeStyle = isFlashingFrame ? "#ff1a35" : s.cA;
+                    ctx.lineWidth = 1.5; ctx.stroke();
+                    
+                    // Core glass tubing reflection shine accent bar
+                    ctx.strokeStyle = "rgba(255, 255, 255, 0.45)"; ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.moveTo(pad + 1, y + 2); ctx.lineTo(pad + fillW - 1, y + 2); ctx.stroke();
+                    ctx.restore();
+                }
+
+                // D. SCI-FI HUD BRACKET ACCENT
+                ctx.strokeStyle = isFlashingFrame ? "#ff1a35" : "rgba(255,255,255,0.25)";
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(pad - 6, y - 3); ctx.lineTo(pad - 6, y + h + 2); ctx.lineTo(pad + 2, y + h + 2);
+                ctx.stroke();
+
+                y += 59; // Uniform layout gap vertical drop
+            } 
+            // STYLE PATH B: INFINITE OR TOGGLE TOKEN BADGE (`isBar === false`)
+            else {
+                ctx.save();
+                const badgeSize = 32;
+                const pulseRadius = Math.sin(fCount * 0.08) * 3;
+
+                ctx.fillStyle = "rgba(4, 8, 18, 0.88)";
+                ctx.strokeStyle = s.cA;
+                ctx.lineWidth = 2;
+                
+                ctx.beginPath();
+                ctx.moveTo(pad + 12, y - 10);
+                ctx.lineTo(pad + badgeSize + 12, y - 10);
+                ctx.lineTo(pad + badgeSize + 22, y + (badgeSize / 2) - 10);
+                ctx.lineTo(pad + badgeSize + 12, y + badgeSize - 10);
+                ctx.lineTo(pad + 12, y + badgeSize - 10);
+                ctx.lineTo(pad + 2, y + (badgeSize / 2) - 10);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.font = (22 + pulseRadius) + "px sans-serif"; 
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(s.ico, pad + (badgeSize / 2) + 12, y + (badgeSize / 2) - 10);
+
+                ctx.fillStyle = "#ffffff";
+                ctx.font = "bold 15px 'Impact', sans-serif";
+                ctx.textAlign = "left";
+                ctx.textBaseline = "middle";
+                ctx.fillText(s.txt, pad + badgeSize + 28, y + (badgeSize / 2) - 12);
+
+                ctx.fillStyle = s.cA;
+                ctx.font = "900 13px monospace";
+                ctx.fillText("ACTIVE", pad + badgeSize + 28, y + (badgeSize / 2) + 4);
+
+                ctx.restore();
+                y += 56; 
+            }
         }
-    });
-    ctx.restore();
+    } catch (hudError) {
+        console.warn("HUD execution safety system bypass invoked:", hudError);
+    } finally {
+        ctx.restore();
+    }
 }
 
 class DrawGame {
     constructor() {
-        this.sky = ctx.createLinearGradient(0, 0, 0, canvasHeight);
-        this.sky.addColorStop(0, lerpColor("#2d56d9","#04070f",1,skyBrightness, 'oklch'));
-        this.sky.addColorStop(.25, lerpColor("#4b7dff","#0d1447",1,skyBrightness, 'oklch'));
-        this.sky.addColorStop(.55, lerpColor("#69d8ff","#18327d",1,skyBrightness, 'oklch'));
-        this.sky.addColorStop(.80, lerpColor("#ffe5ac","#4361c7",1,skyBrightness, 'oklch'));
-        this.sky.addColorStop(1, lerpColor("#72eed3","#ff9450",1,skyBrightness, 'oklch'));
+        this.glowCircleCount = 18;
+        this.waveCount = 5;
+        this.sparkleCount = 90;
+        this.auroraCount = 25;
 
-        this.horizon = ctx.createLinearGradient(0, canvasHeight * .45, 0, canvasHeight);
-        this.horizon.addColorStop(0, "rgba(255,255,255,0)");
-        this.horizon.addColorStop(.5, "rgba(255,255,255,.05)");
-        this.horizon.addColorStop(1, "rgba(180,255,255,.15)");
+        this.cachedSkyGrad = null;
+        this.lastCachedFrame = -100; 
     }
 
     drawBackground() {
-        if (!this.sky) {
-            const sky = ctx.createLinearGradient(0, 0, 0, canvasHeight);
-            sky.addColorStop(0, lerpColor("#2d56d9","#04070f",1,skyBrightness, 'oklch'));
-            sky.addColorStop(.25, lerpColor("#4b7dff","#0d1447",1,skyBrightness, 'oklch'));
-            sky.addColorStop(.55, lerpColor("#69d8ff","#18327d",1,skyBrightness, 'oklch'));
-            sky.addColorStop(.80, lerpColor("#ffe5ac","#4361c7",1,skyBrightness, 'oklch'));
-            sky.addColorStop(1, lerpColor("#72eed3","#ff9450",1,skyBrightness, 'oklch'));
-            ctx.fillStyle = sky;
-        } else {
-            ctx.fillStyle = this.sky;
-        }
-        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        const currentFrame = (typeof frameCount === "number") ? frameCount : 0;
+        const curW = (typeof canvasWidth === "number") ? canvasWidth : 800;
+        const curH = (typeof canvasHeight === "number") ? canvasHeight : 600;
 
-        // Floating Glow Circles
-        for (let i = 0; i < 18; i++) {
-            const x = (frameCount * .15 + i * 130) % (canvasWidth + 100) - 50;
-            const y = 70 + Math.sin(frameCount * .01 + i) * 35 + i * 10;
-            ctx.fillStyle = "rgba(108, 189, 255, 0.04)";
+        // Recalculate color spectrum once a second to maximize frame rates
+        if (!this.cachedSkyGrad || (currentFrame - this.lastCachedFrame > 60)) {
+            const sky = ctx.createLinearGradient(0, 0, 0, curH);
+            
+            // Your exact original bright sky colors with proper alpha tags
+            sky.addColorStop(0.0, typeof lerpColor === "function" ? lerpColor("#2d56d9", "#04070f", 1, skyBrightness, 'oklch') : "#04070f");
+            sky.addColorStop(0.25, typeof lerpColor === "function" ? lerpColor("#4b7dff", "#0d1447", 1, skyBrightness, 'oklch') : "#0d1447");
+            sky.addColorStop(0.55, typeof lerpColor === "function" ? lerpColor("#69d8ff", "#18327d", 1, skyBrightness, 'oklch') : "#18327d");
+            sky.addColorStop(0.80, typeof lerpColor === "function" ? lerpColor("#ffe5ac", "#4361c7", 1, skyBrightness, 'oklch') : "#4361c7");
+            sky.addColorStop(1.0, typeof lerpColor === "function" ? lerpColor("#72eed3", "#ff9450", 1, skyBrightness, 'oklch') : "#ff9450");
+            
+            this.cachedSkyGrad = sky;
+            this.lastCachedFrame = currentFrame;
+        }
+
+        ctx.fillStyle = this.cachedSkyGrad;
+        ctx.fillRect(0, 0, curW, curH);
+
+        // 2. Floating Glow Circles
+        ctx.fillStyle = "rgba(108, 189, 255, 0.04)";
+        for (let i = 0; i < this.glowCircleCount; i++) {
+            const x = (currentFrame * 0.15 + i * 130) % (curW + 100) - 50;
+            const y = 70 + Math.sin(currentFrame * 0.01 + i) * 35 + i * 10;
             ctx.beginPath();
             ctx.arc(x, y, 18, 0, Math.PI * 2);
             ctx.fill();
         }
         
-        // Atmospheric Waves
-        for (let i = 0; i < 5; i++) {
-            const alpha = 0.1 + i / 100;
-            ctx.fillStyle = `rgba(78, 137, 165, ${String(alpha)})`;
-            const y = 120 + i * 75 + Math.sin(frameCount * .007 + i) * 10;
+        // 3. Atmospheric Waves Layer
+        const waveBaseY = 120;
+        ctx.save();
+        // 🚀 THE SMOOTHING FIX: Set a single base color once, and use globalAlpha 
+        // to control the opacity levels. This completely stops memory thrashing!
+        ctx.fillStyle = "rgb(42, 142, 172)"; 
+        
+        for (let i = 0; i < this.waveCount; i++) {
+            ctx.globalAlpha = 0.06 + i / 120; // Blazing fast math variable adjustment
+            const y = waveBaseY + i * 75 + Math.sin(currentFrame * 0.007 + i) * 10;
+            
             ctx.beginPath();
             ctx.moveTo(0, y);
-            ctx.bezierCurveTo(canvasWidth * .2, y - 25, canvasWidth * .4, y + 30, canvasWidth * .6, y);
-            ctx.bezierCurveTo(canvasWidth * .8, y - 30, canvasWidth, y + 20, canvasWidth, y + 60);
-            ctx.lineTo(canvasWidth, canvasHeight);
-            ctx.lineTo(0, canvasHeight);
+            ctx.bezierCurveTo(curW * 0.2, y - 25, curW * 0.4, y + 30, curW * 0.6, y);
+            ctx.bezierCurveTo(curW * 0.8, y - 30, curW, y + 20, curW, y + 60);
+            ctx.lineTo(curW, curH);
+            ctx.lineTo(0, curH);
             ctx.closePath();
             ctx.fill();
         }
+        ctx.restore();
 
-        // Horizon Glow
-        if (!this.horizon) {
-            const horizon = ctx.createLinearGradient(0, canvasHeight * .45, 0, canvasHeight);
-            horizon.addColorStop(0, "rgba(255,255,255,0)");
-            horizon.addColorStop(.5, "rgba(255,255,255,.05)");
-            horizon.addColorStop(1, "rgba(180,255,255,.15)");
-            ctx.fillStyle = horizon;
-        } else {
-            ctx.fillStyle = this.horizon;
-        }
-        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        // 4. Horizon Glow Panel
+        const horizon = ctx.createLinearGradient(0, curH * 0.45, 0, curH);
+        horizon.addColorStop(0, "rgba(255,255,255,0)");
+        horizon.addColorStop(0.5, "rgba(255,255,255,0.05)");
+        horizon.addColorStop(1, "rgba(180,255,255,0.15)");
+        ctx.fillStyle = horizon;
+        ctx.fillRect(0, 0, curW, curH);
 
-        // Sparkles
-        for (let i = 0; i < 90; i++) {
-            const x = (i * 91) % canvasWidth;
+        // 5. Star Sparkles
+        for (let i = 0; i < this.sparkleCount; i++) {
+            const x = (i * 91) % curW;
             const y = (i * 37) % 330;
-            const pulse = .25 + .75 * Math.sin(frameCount * .02 + i);
-            ctx.fillStyle = `rgba(255,255,255,${0.15 * pulse})`;
+            const pulse = 0.25 + 0.75 * Math.sin(currentFrame * 0.02 + i);
+            ctx.fillStyle = "rgba(255,255,255," + (0.15 * pulse) + ")";
             ctx.fillRect(x, y, 2, 2);
         }
+
         this.drawSunAndMoon();
 
-        for (let i = 0; i < 25; i++) {
+        // 6. Aurora Wind Streams (High-Speed Path Architecture)
+        ctx.save();
+        ctx.lineCap = "round"; 
+        
+        for (let i = 0; i < this.auroraCount; i++) {
             const speed = 1 + Math.sin(i * 17.3) * 0.4 + 1.5;
             const length = 60 + (Math.sin(i * 9.7) + 1) * 50;
-            // Move RIGHT ➜ LEFT
-            const x = canvasWidth + length - ((frameCount * speed + i * 145) % (canvasWidth + length * 2))
-            const y = 40 + i * 22 + Math.sin(frameCount * 0.015 + i * 0.8) * 12;
-            const curve = Math.sin(frameCount * 0.05 + i) * 8;
-            const gradient = ctx.createLinearGradient(x, y, x - length, y);
+            const x = curW + length - ((currentFrame * speed + i * 145) % (curW + length * 2));
+            const y = 40 + i * 22 + Math.sin(currentFrame * 0.015 + i * 0.8) * 12;
+            const curve = Math.sin(currentFrame * 0.05 + i) * 8;
 
-            gradient.addColorStop(0, `rgba(255, 255, 255, 0.17)`);
-            gradient.addColorStop(0.25, `rgba(255, 255, 255, 0.27)`);
-            gradient.addColorStop(0.75, `rgba(255, 255, 255, 0.45)`);
-            gradient.addColorStop(1, `rgba(255, 255, 255, 0.51)`);
-
-            ctx.strokeStyle = gradient;
+            ctx.strokeStyle = "rgba(255, 255, 255, " + (0.18 + (i % 3) * 0.08) + ")";
             ctx.lineWidth = 1 + (i % 3);
-            ctx.lineCap = "round";
+            
             ctx.beginPath();
             ctx.moveTo(x, y);
-
-            ctx.bezierCurveTo(
-                x - length * 0.3, y + curve,
-                x - length * 0.7, y - curve,
-                x - length, y
-            );
+            ctx.bezierCurveTo(x - length * 0.3, y + curve, x - length * 0.7, y - curve, x - length, y);
             ctx.stroke();
         }
+        ctx.restore();
 
         ctx.save();
-        ctx.globalAlpha = 1 - skyBrightness;
-        stars.forEach(star => {star.draw();});
+        ctx.globalAlpha = Math.max(0, Math.min(1, 1 - skyBrightness));
+        if (typeof stars !== "undefined" && Array.isArray(stars)) {
+            stars.forEach(star => { if(star.draw) star.draw(); });
+        }
         ctx.restore();
-        clouds.forEach(cloud => {cloud.draw();});
+
+        if (typeof clouds !== "undefined" && Array.isArray(clouds)) {
+            clouds.forEach(cloud => { if(cloud.draw) cloud.draw(); });
+        }
         
-        if(powerUpsState.dash) {
-            for(let i = 0; i < 35; i++) {
-                ctx.strokeStyle = "rgba(255, 255, 255, 0.44)";
-                ctx.beginPath();
-                const x = Math.random() * canvasWidth;
-                const y = Math.random() * canvasHeight;
+        // 7. Warp Velocity Overlay
+        if (typeof powerUpsState !== "undefined" && powerUpsState.dash) {
+            ctx.save();
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.44)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            for (let i = 0; i < 35; i++) {
+                const x = Math.random() * curW;
+                const y = Math.random() * curH;
                 ctx.moveTo(x, y);
                 ctx.lineTo(x - 50, y);
-                ctx.stroke();
             }
+            ctx.stroke(); 
+            ctx.restore();
         }
     }
 
     drawSunAndMoon() {
-        const t = worldTime / DAY_LENGTH;
+        const currentWorldTime = (typeof worldTime === "number") ? worldTime : 0;
+        const currentDayLength = (typeof DAY_LENGTH === "number") ? DAY_LENGTH : 50000;
+        const curW = (typeof canvasWidth === "number") ? canvasWidth : 800;
+        const curH = (typeof canvasHeight === "number") ? canvasHeight : 600;
+        
+        const t = currentWorldTime / currentDayLength;
         const angle = t * Math.PI * 2 - Math.PI;
         const radius = 360;
-        const cx = canvasWidth / 2 + canvasWidth / 4;
-        const cy = canvasHeight / 6 * 3.5;
+        const cx = curW / 2 + curW / 4;
+        const cy = curH / 6 * 3.5;
+        
         const sunX = cx + Math.cos(angle) * radius;
         const sunY = cy + Math.sin(angle) * radius;
         const moonX = cx + Math.cos(angle + Math.PI) * radius;
         const moonY = cy + Math.sin(angle + Math.PI) * radius;
+
         // Sun
+        ctx.save();
         ctx.shadowColor = "#ffe66d";
-        ctx.shadowBlur = 120;
-        const g = ctx.createRadialGradient(sunX, sunY, 5, sunX, sunY, 90);
-        g.addColorStop(0,"#ffe18e");
-        g.addColorStop(.25,"#fff28cc4");
-        g.addColorStop(.7,"#ffca3a91");
-        g.addColorStop(1,"rgba(255,202,58,0)");
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(sunX,sunY,90,0,PIE_2);
-        ctx.fill();
-        ctx.beginPath();
+        ctx.shadowBlur = skyBrightness > 0.1 ? 60 : 0; 
+        
+        const sunGlow = ctx.createRadialGradient(sunX, sunY, 5, sunX, sunY, 90);
+        sunGlow.addColorStop(0, "#ffe18e");
+        sunGlow.addColorStop(0.25, "rgba(255, 242, 140, 0.77)");
+        sunGlow.addColorStop(0.7, "rgba(255, 202, 58, 0.56)");
+        sunGlow.addColorStop(1, "rgba(255, 202, 58, 0)");
+        
+        ctx.fillStyle = sunGlow;
+        ctx.beginPath(); ctx.arc(sunX, sunY, 90, 0, Math.PI * 2); ctx.fill();
+        
         ctx.fillStyle = "#ffe27a";
         ctx.shadowColor = "rgba(236, 167, 76, 0.82)";
-        ctx.shadowBlur = 35;
-        ctx.arc(sunX,sunY,38,0,PIE_2);
-        ctx.fill();
-        // MOON
+        ctx.shadowBlur = skyBrightness > 0.1 ? 20 : 0;
+        ctx.beginPath(); ctx.arc(sunX, sunY, 38, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+
+        // Moon
         ctx.save();
         ctx.translate(moonX, moonY);
         ctx.rotate(0.35);
 
         const moonR = 27;
         ctx.shadowBlur = 0; 
+        
         const moonGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, moonR * 2.2);
-        moonGlow.addColorStop(0, "rgba(200, 225, 255, 0.4)");   // Inner bright core glow
-        moonGlow.addColorStop(0.3, "rgba(140, 185, 255, 0.15)"); // Mid-atmosphere bloom
-        moonGlow.addColorStop(1, "rgba(0, 0, 0, 0)");           // Smooth fade to space
+        moonGlow.addColorStop(0, "rgba(200, 225, 255, 0.4)");   
+        moonGlow.addColorStop(0.3, "rgba(140, 185, 255, 0.15)"); 
+        moonGlow.addColorStop(1, "rgba(0, 0, 0, 0)");           
         
         ctx.fillStyle = moonGlow;
-        ctx.beginPath();
-        ctx.arc(0, 0, moonR * 2.2, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.beginPath(); ctx.arc(0, 0, moonR * 2.2, 0, Math.PI * 2); ctx.fill();
         
         const moonGrad = ctx.createLinearGradient(-moonR, -moonR, moonR, moonR);
-        moonGrad.addColorStop(0, "#ffffff");   // Blazing lit edge
-        moonGrad.addColorStop(0.6, "#f5f9ff"); // Soft body color
-        moonGrad.addColorStop(1, "#b5ceff");   // Deep shadow terminator mix
+        moonGrad.addColorStop(0, "#ffffff");   
+        moonGrad.addColorStop(0.6, "#f5f9ff"); 
+        moonGrad.addColorStop(1, "#b5ceff");   
         ctx.fillStyle = moonGrad;
 
         ctx.beginPath();
         ctx.arc(0, 0, moonR, -Math.PI / 2, Math.PI / 2, false);
         ctx.quadraticCurveTo(moonR * 0.45, 0, 0, -moonR);
-        
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.restore(); // Restores from moon translate/rotate
-        // Clean up canvas states safely
-        ctx.shadowBlur = 0;
-    }
-}
-
-class Mountain {
-    constructor(baseY, height, peakColor, shadowColor, layers = 7) {
-        this.baseY = baseY;           // The bottom anchor line of the mountain
-        this.height = height;         // Maximum peak height factor
-        this.peakColor = peakColor;   // Highlight sunset orange/pink color
-        this.shadowColor = shadowColor; // Deep blue valley shadow color
-        this.points = [];             // 🚀 STATIC POSITION CACHE: Calculated once, stays fixed!
-
-        this.generateShape(layers);
-    }
-
-    // 🚀 Midpoint Displacement Algorithm (Creates beautiful, natural jagged mountain peaks)
-    generateShape(layers) {
-        let segments = Math.pow(2, layers);
-        this.points = new Array(segments + 1);
-        
-        // Lock absolute boundaries
-        this.points[0] = this.baseY - (Math.random() * this.height * 0.3);
-        this.points[segments] = this.baseY - (Math.random() * this.height * 0.3);
-        
-        let roughness = 0.45; // Controls how sharp or smooth the mountain peaks look
-        let displacement = this.height;
-
-        // Recursive generation loop
-        for (let i = 1; i <= layers; i++) {
-            let stride = segments / Math.pow(2, i);
-            let mid = stride;
-
-            while (mid < segments) {
-                let left = mid - stride;
-                let right = mid + stride;
-                
-                // Displace midpoint position smoothly
-                this.points[mid] = (this.points[left] + this.points[right]) / 2 + (Math.random() - 0.5) * displacement;
-                
-                mid += stride * 2;
-            }
-            displacement *= roughness;
-        }
-    }
-
-    draw() {
-        if (this.points.length === 0) return;
-
-        ctx.save();
-        
-        // 1. SETUP MOUNTAIN SUNSET GRADIENT (Matches the warm light shifting to deep blue shadows)
-        const mountainGrad = ctx.createLinearGradient(0, this.baseY - this.height, 0, this.baseY);
-        mountainGrad.addColorStop(0, this.peakColor);   // Glowing pinkish-orange top
-        mountainGrad.addColorStop(0.4, this.peakColor);
-        mountainGrad.addColorStop(1, this.shadowColor); // Dark blue vector valley bottom
-        
-        ctx.fillStyle = mountainGrad;
-
-        // 2. MAP FIXED POINTS ARRAY TO CANVAS PATH
-        ctx.beginPath();
-        const segmentWidth = canvasWidth / (this.points.length - 1);
-        
-        // Start bottom-left corner of screen bounds
-        ctx.moveTo(0, canvasHeight); 
-        ctx.lineTo(0, this.points[0]);
-
-        for (let i = 1; i < this.points.length; i++) {
-            ctx.lineTo(i * segmentWidth, this.points[i]);
-        }
-
-        // Close path down right boundary wall back to bottom left
-        ctx.lineTo(canvasWidth, canvasHeight);
         ctx.closePath();
         ctx.fill();
 
         ctx.restore();
-    }
-
-    // Parallax Scrolling Effect Handler
-    update(dt) {
-        // Optional: If you want background mountains to scroll slowly left:
-        // const speed = game_config.pipeSpeed * 0.15; 
-        // this.scrollOffset -= speed * (dt / 16.67);
+        ctx.shadowBlur = 0; 
     }
 }
 
@@ -1664,11 +1713,16 @@ function drawGround(){
 }
 
 function updateWorldTime(dt) {
-    worldTime += dt;
-    if(worldTime >= DAY_LENGTH) {
+    const deltaTime = dt || 16.67;
+    const currentDayLength = (typeof DAY_LENGTH === "number") ? DAY_LENGTH : 50000;
+    
+    worldTime += deltaTime;
+    if (worldTime >= currentDayLength) {
         worldTime = 0;
     }
-    skyBrightness = (Math.sin(worldTime * Math.PI * 2 / DAY_LENGTH - Math.PI/2) + 1) / 2;
+    
+    // Smooth parametric evaluation curve for time cycles
+    skyBrightness = (Math.sin((worldTime * Math.PI * 2) / currentDayLength - Math.PI / 2) + 1) / 2;
 }
 
 function updateHud() {
@@ -2111,125 +2165,257 @@ function revivePlayer() {
 }
 
 function spawnObjects() {
-    const difficulty = score * game_config.difficultyRamp;
+    if (typeof gameState === "undefined" || gameState !== Game_State.running || !frameCount) return;
 
-    if (frameCount - lastPipeTime > Spawn_Rates.pipeSpawnRate - Math.min(difficulty, 18)) {
-        pipes.push(new Pipe());
+    try {
+        // Cache configuration lookups locally to speed up execution
+        const config = (typeof game_config !== "undefined") ? game_config : { difficultyRamp: 0.05, maxPipes: 4, groundHeight: 100 };
+        const rates = (typeof Spawn_Rates !== "undefined") ? Spawn_Rates : { pipeSpawnRate: 120, treeSpawnRate: 90, coinSpawnRate: 80 };
+        
+        const difficulty = (typeof score === "number") ? score * config.difficultyRamp : 0;
+        const curCanvasHeight = (typeof canvasHeight === "number") ? canvasHeight : 600;
+        const curCanvasWidth = (typeof canvasWidth === "number") ? canvasWidth : 800;
+
+        if (lastPipeTime === 0) lastPipeTime = frameCount;
+        if (lastTreeTime === 0) lastTreeTime = frameCount;
+        if (lastBushTime === 0) lastBushTime = frameCount;
+        if (lastCoinTime === 0) lastCoinTime = frameCount;
+        if (lastPowerUpTime === 0) lastPowerUpTime = frameCount;
+        
+        const pipeInterval = Math.max(15, rates.pipeSpawnRate - Math.min(difficulty, 18));
+        if (frameCount - lastPipeTime > pipeInterval) {
+            pipes.push(new Pipe());
+            lastPipeTime = frameCount;
+        }
+
+        // Clean arrays cleanly from left edge without heavy array rebuilding slicing loops
+        const maxPipesLimit = config.maxPipes || 4;
+        if (pipes.length > maxPipesLimit) {
+            pipes.shift(); // Much faster than splice() for deleting individual items from front
+        }
+
+        const treeInterval = Math.max(20, rates.treeSpawnRate - Math.min(difficulty, 16) * 0.25);
+        if (frameCount - lastTreeTime > treeInterval) {
+            trees.push(new Tree());
+            lastTreeTime = frameCount;
+        }
+
+        const bushInterval = Math.max(20, (rates.treeSpawnRate || rates.bushSpawnRate || 90) + 26 - Math.min(difficulty, 14));
+        if (frameCount - lastBushTime > bushInterval) {
+            bushes.push(new Bush());
+            lastBushTime = frameCount;
+        }
+
+        const minY = 100;
+        const maxY = Math.max(120, curCanvasHeight - config.groundHeight - 100);
+        const spawnX = curCanvasWidth + 40;
+
+        const coinInterval = Math.max(15, rates.coinSpawnRate + 6 - Math.min(difficulty, 6));
+        if (frameCount - lastCoinTime > coinInterval) {
+            if (coins.length < 25) { // Hard limit prevents array explosion memory bloat
+                coins.push(new Coin(spawnX, minY + Math.random() * (maxY - minY)));
+            }
+            lastCoinTime = frameCount;
+        }
+        
+        const pwrInterval = (rates.coinSpawnRate || 80) * 3;
+        if (frameCount - lastPowerUpTime > pwrInterval) {
+            powerUps.push(new PowerUp(spawnX, minY + Math.random() * (maxY - minY)));
+            lastPowerUpTime = frameCount; // Reset timer even if random check fails to distribute items evenly
+        }
+
+        if (typeof powerUpsState !== "undefined" && powerUpsState.dash && typeof spawnDashParticle === "function") {
+            spawnDashParticle();
+        }
+
+    } catch (spawnError) {
+        console.warn("Spawning recovery protocol triggered:", spawnError);
+        // Force sync counter trackers forward to break out of loop lock calculations
         lastPipeTime = frameCount;
-    }
-
-    if (pipes.length > game_config.maxPipes) {
-        pipes.splice(0, pipes.length - game_config.maxPipes);
-    }
-    if (frameCount - lastTreeTime > Spawn_Rates.treeSpawnRate - Math.min(difficulty, 16) * 0.25) {
-        trees.push(new Tree());
         lastTreeTime = frameCount;
-    }
-    if (frameCount - lastBushTime > Spawn_Rates.treeSpawnRate + 26 - Math.min(difficulty, 14)) {
-        bushes.push(new Bush());
         lastBushTime = frameCount;
-    }
-    if (frameCount - lastCoinTime > Spawn_Rates.coinSpawnRate + 6 - Math.min(difficulty, 6)) {
-        const minY = 100;
-        const maxY = canvasHeight - game_config.groundHeight - 100;
-        coins.push(new Coin(canvasWidth + 40, minY + Math.random() * (maxY - minY)));
         lastCoinTime = frameCount;
-    }
-    
-    // Spawn power-ups occasionally
-    if (frameCount - lastPowerUpTime > Spawn_Rates.coinSpawnRate * 3 && Math.random() > 0.6) {
-        const minY = 100;
-        const maxY = canvasHeight - game_config.groundHeight - 100;
-        powerUps.push(new PowerUp(canvasWidth + 40, minY + Math.random() * (maxY - minY)));
         lastPowerUpTime = frameCount;
-    }
-
-    if(powerUpsState.dash) {
-        spawnDashParticle();
     }
 }
 
 function updateGameObjects(dt) {
-    if (lastFrameTime === 0) lastFrameTime = dt;
+    if (typeof gameState === "undefined" || gameState !== Game_State.running) return;
+    try {
+        const deltaTime = dt || 16.67;
+        if (lastFrameTime === 0) lastFrameTime = deltaTime;
 
-    stars.forEach(star => star.update());
-    clouds.forEach(cloud => cloud.update(dt));
-    bird.update(dt);
-    trees.forEach(tree => tree.update(dt));
-    bushes.forEach(bush => bush.update(dt));
-    pipes.forEach(pipe => pipe.update(dt));
-    coins.forEach(coin => {
-        coin.update(dt);
-        if(powerUpsState.magnet) {
-            const dx = bird.x - coin.x;
-            const dy = bird.y - coin.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if(dist < 170) {
-                coin.x += dx * .08;
-                coin.y += dy * .08;
+        const birdX = bird ? bird.x : 0;
+        const birdY = bird ? bird.y : 0;
+        const isMagnetActive = typeof powerUpsState !== "undefined" && powerUpsState.magnet;
+
+        if (bird && typeof bird.update === "function") bird.update(deltaTime);
+
+        // Background decorative layers require minimal boundary checks
+        if (Array.isArray(stars)) stars.forEach(star => star.update && star.update());
+        if (Array.isArray(clouds)) clouds.forEach(cloud => cloud.update && cloud.update(deltaTime));
+
+        // Scenery: Trees Layer
+        if (Array.isArray(trees)) {
+            for (let i = trees.length - 1; i >= 0; i--) {
+                const tree = trees[i];
+                if (tree.update) tree.update(deltaTime);
+                
+                // If a tree rolls fully off the left edge, pop it immediately to save CPU cycles
+                if (tree.x + (tree.width || 60) < -50) {
+                    trees.splice(i, 1);
+                }
             }
-        }});
-    powerUps.forEach(pu => pu.update(dt));
+        }
+
+        if (Array.isArray(bushes)) {
+            for (let i = bushes.length - 1; i >= 0; i--) {
+                const bush = bushes[i];
+                if (bush.update) bush.update(deltaTime);
+                if (bush.x + (bush.width || 50) < -50) {
+                    bushes.splice(i, 1);
+                }
+            }
+        }
+
+        if (Array.isArray(pipes)) {
+            for (let i = pipes.length - 1; i >= 0; i--) {
+                const pipe = pipes[i];
+                if (pipe.update) pipe.update(deltaTime);
+                
+                // Keep the array light. Splice any pipes that traveled past visibility boundaries
+                if (pipe.x + (pipe.width || 78) < -60) {
+                    pipes.splice(i, 1);
+                }
+            }
+        }
+
+        if (Array.isArray(coins)) {
+            for (let i = coins.length - 1; i >= 0; i--) {
+                const coin = coins[i];
+                if (coin.update) coin.update(deltaTime);
+
+                if (coin.collected || coin.x + 30 < -40) {
+                    coins.splice(i, 1);
+                    continue;
+                }
+
+                if (isMagnetActive) {
+                    const dx = birdX - coin.x;
+                    const dy = birdY - coin.y;
+                    
+                    const distSq = dx * dx + dy * dy;
+                    if (distSq < 28900) { // 28900 is exactly 170 * 170 squared
+                        coin.x += dx * 0.08;
+                        coin.y += dy * 0.08;
+                    }
+                }
+            }
+        }
+
+        if (Array.isArray(powerUps)) {
+            for (let i = powerUps.length - 1; i >= 0; i--) {
+                const pu = powerUps[i];
+                if (pu.update) pu.update(deltaTime);
+                
+                if (pu.collected || pu.x + 30 < -40) {
+                    powerUps.splice(i, 1);
+                }
+            }
+        }
+
+    } catch (updateError) {
+        console.warn("High-speed game object manager bypassed an internal update exception safely:", updateError);
+    }
 }
 
 
 function initGame({ jumpImmediately = true } = {}) {
-    if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-    }
-
-    bird = new Bird();
-    pipes = [];
-    clouds = Array.from({ length: window.innerWidth > 768 ? 6 : 4 }, () => new Cloud());
-    stars = Array.from({ length: Math.max(36, Math.min(70, Math.round((canvasWidth / BASE_WIDTH) * 70))) }, () => new Star());
-    trees = [];
-    bushes = [];
-    coins = [];
-    powerUps = [];
-    particles = [];
-    backgroundMountains = [];
-    frameCount = 0;
-    score = 0;
-    flashTimer = 0;
-    lastFrameTime = 0;
-    lastPipeTime = 0;
-    lastCoinTime = 0;
-    lastTreeTime = 0;
-    lastBushTime = 0;
-    lastPowerUpTime = 0;
-    scoreEl.textContent = 0;
-
-    gameState = Game_State.running;
-    updateHud();
-    startOverlay.classList.remove('visible');
-    gameOverOverlay.classList.remove('visible');
-    if (jumpImmediately && bird) {
-        bird.jump();
-    }
-    animationFrameId = requestAnimationFrame(gameLoop);
-}
-
-function endGame() {
     try {
-        if (gameState === Game_State.start) {
-            throw new Error("Cannot call endGame() while game hasn't started");
-        }
-        gameState = Game_State.game_over;
-        bestScore = Math.max(bestScore, score);
-        saveStoredStats();
-        updateHud();
-        
-        const isNewBest = score >= bestScore;
-        const bestLabel = isNewBest ? '🏆 NEW BEST!!' : `Best: ${bestScore}`;
-        
-        finalMessage.textContent = `Score: ${score} · ${bestLabel} · Coins: ${coinCount}`;
-        gameOverOverlay.classList.add('visible');
         if (animationFrameId) {
             cancelAnimationFrame(animationFrameId);
             animationFrameId = null;
         }
-    } catch(error) {
-        console.error('Error: ', error);
+
+        bird = new Bird();
+        pipes = [];
+        trees = [];
+        bushes = [];
+        coins = [];
+        powerUps = [];
+        particles = [];
+
+        // 3. Fallback checks for display metrics
+        const curW = (typeof canvasWidth === "number" && canvasWidth > 0) ? canvasWidth : 800;
+        const baseW = (typeof BASE_WIDTH === "number") ? BASE_WIDTH : 800;
+        
+        const isMobile = curW < 768;
+        clouds = Array.from({ length: isMobile ? 4 : 6 }, () => new Cloud());
+        const starCount = Math.max(36, Math.min(70, Math.round((curW / baseW) * 70)));
+        stars = Array.from({ length: starCount }, () => new Star());
+
+        frameCount = 0;
+        score = 0;
+        flashTimer = 0;
+        lastFrameTime = 0;
+        lastPipeTime = 0;
+        lastCoinTime = 0;
+        lastTreeTime = 0;
+        lastBushTime = 0;
+        lastPowerUpTime = 0;
+
+        // 5. Safe DOM Interface resets
+        if (typeof scoreEl !== "undefined" && scoreEl) scoreEl.textContent = "0";
+        if (typeof startOverlay !== "undefined" && startOverlay) startOverlay.classList.remove('visible');
+        if (typeof gameOverOverlay !== "undefined" && gameOverOverlay) gameOverOverlay.classList.remove('visible');
+
+        gameState = Game_State.running; 
+        if (typeof updateHud === "function") updateHud();
+        if (jumpImmediately && bird && typeof bird.jump === "function") {
+            bird.jump();
+        }
+
+        animationFrameId = requestAnimationFrame(gameLoop);
+    } catch (initError) {
+        console.error("Critical Failure during Game Initialization Sequence:", initError);
+        gameState = Game_State.start;
+        if (typeof startOverlay !== "undefined" && startOverlay) startOverlay.classList.add('visible');
+    }
+}
+
+function endGame() {
+    try {
+        if (gameState === Game_State.start) return;
+        // Secure metrics against unexpected NaN errors
+        const rawBest = (typeof bestScore === "number" && Number.isFinite(bestScore)) ? bestScore : 0;
+        const curScore = (typeof score === "number" && Number.isFinite(score)) ? score : 0;
+        const curCoins = (typeof coinCount === "number" && Number.isFinite(coinCount)) ? coinCount : 0;
+
+        bestScore = Math.max(rawBest, curScore);
+        gameState = Game_State.game_over;
+
+        if (typeof saveStoredStats === "function") saveStoredStats();
+        if (typeof updateHud === "function") updateHud();
+        
+        // Accurate record-breaking detection string
+        const isNewBest = curScore > rawBest && curScore > 0;
+        const bestLabel = isNewBest ? '🏆 NEW BEST!' : `Best: ${bestScore}`;
+        
+        if (typeof finalMessage !== "undefined" && finalMessage) {
+            finalMessage.textContent = `Score: ${curScore} · ${bestLabel} · Coins: ${curCoins}`;
+        }
+        
+        if (typeof gameOverOverlay !== "undefined" && gameOverOverlay) {
+            gameOverOverlay.classList.add('visible');
+        }
+
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+        }
+
+    } catch (endError) {
+        console.error("Critical Failure during End Game Sequence:", endError);
     }
 }
 
