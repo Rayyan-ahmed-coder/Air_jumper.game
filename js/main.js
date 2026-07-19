@@ -24,7 +24,7 @@ const game_config = {
     maxStars: 70,
     maxPipes: 12,
     maxTrees: 15,
-    maxCoins: 20,
+    maxCoins: 18,
 };
 
 const PIE_2 = Math.PI * 2;
@@ -36,7 +36,7 @@ let devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
 
 let bird;
 
-let pipes, clouds, stars, trees, bushes, coins, particles, powerUps;
+let clones, pipes, clouds, stars, trees, bushes, coins, particles, powerUps;
 
 let frameCount;
 let score;
@@ -147,6 +147,26 @@ function saveStoredStats() {
 }
 
 function hitPlayer() {
+    if (typeof clones !== "undefined" && Array.isArray(clones) && clones.length > 0) {
+        // Look through active hazards to see what hit us
+        const collidingPipe = pipes.find(p => !p.passed && !p.destroyed);
+        if (collidingPipe) {
+            for (let i = 0; i < clones.length; i++) {
+                if (clones[i].checkDamageInterception(collidingPipe)) {
+                    // Remove clone from state arrays instantly
+                    clones.splice(i, 1);
+                    
+                    // If no clones remain, turn off the global tracking powerup state flags
+                    if (clones.length === 0 && typeof powerUpsState !== "undefined") {
+                        powerUpsState.shadowClone = false;
+                        if (typeof powerUpTimers !== "undefined" && powerUpTimers > 0) powerUpTimers.shadowClone = 0;
+                    }
+                    return; // 🛡️ CRITICAL EXIT: Player absorbs zero damage and keeps flying!
+                }
+            }
+        }
+    }
+
     if (powerUpsState.dash) {
         // Safe tracking protection checks
         const radius = (typeof game_config !== "undefined" && game_config.birdRadius) ? game_config.birdRadius : 24;
@@ -168,7 +188,7 @@ function hitPlayer() {
             powerUpTimers.shield = 0; 
         }
         
-        if (typeof screenShake === "function") screenShake(8); // Juicy impact shake
+        if (typeof screenShake === "function") screenShake(10); // Juicy impact shake
         return;
     }
 
@@ -304,7 +324,7 @@ class Bird {
         gradient.addColorStop(1, '#f6ae2d');
         ctx.fillStyle = gradient;
         ctx.beginPath();
-        ctx.arc(0, 0, game_config.birdRadius, 0, Math.PI * 2);
+        ctx.arc(0, 0, game_config.birdRadius, 0, PIE_2);
         ctx.fill();
 
         // 3. Wings (Layered behind the body)
@@ -312,24 +332,24 @@ class Bird {
         ctx.fillStyle = "#ffd94d";
         
         ctx.beginPath();
-        ctx.ellipse(-10, flap, 10, 5, -0.5, 0, Math.PI * 2);
+        ctx.ellipse(-10, flap, 10, 5, -0.5, 0, PIE_2);
         ctx.fill();
         
         ctx.beginPath();
-        ctx.ellipse(10, flap, 10, 5, 0.5, 0, Math.PI * 2);
+        ctx.ellipse(10, flap, 10, 5, 0.5, 0, PIE_2);
         ctx.fill();
 
         // 4. Eye 
         ctx.fillStyle = '#162a44';
         ctx.beginPath();
-        ctx.arc(6, -2, 4.5, 0, Math.PI * 2);
+        ctx.arc(6, -2, 4.5, 0, PIE_2);
         ctx.fill();
 
         // 5. Outer Outline
         ctx.strokeStyle = '#1a49a1';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(0, 2, game_config.birdRadius + 2, 0, Math.PI * 2);
+        ctx.arc(0, 2, game_config.birdRadius + 2, 0, PIE_2);
         ctx.stroke();
 
         // 6. Powerups
@@ -406,7 +426,7 @@ class Bird {
                             ctx.globalAlpha = this.life / this.maxLife;
                             ctx.fillStyle = this.color;
                             ctx.beginPath();
-                            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                            ctx.arc(this.x, this.y, this.size, 0, PIE_2);
                             ctx.fill();
                             ctx.restore();
                         }
@@ -416,39 +436,14 @@ class Bird {
             ctx.restore();
         }
         
-        // --- CLONE RENDERING MECHANIC ---
-        if (powerUpsState.shadowClone && this.clones) {
-            this.clones.forEach(clone => {
-                ctx.save();
-                const wave = Math.sin(clone.phase) * 8;
-                
-                ctx.translate(-25, clone.yOffset + wave);
-                ctx.globalAlpha = clone.alpha;
-
-                ctx.shadowColor = '#bd00ff';
-                ctx.shadowBlur = 18;
-
-                const cloneGrad = ctx.createRadialGradient(-4, -4, 4, 0, 0, game_config.birdRadius * 1.5);
-                cloneGrad.addColorStop(0, '#f9d6ff');
-                cloneGrad.addColorStop(0.4, '#bd00ff');
-                cloneGrad.addColorStop(1, '#4a0066');
-
-                ctx.fillStyle = cloneGrad;
-                ctx.strokeStyle = '#e200ff';
-                ctx.lineWidth = 2.5;
-
-                ctx.beginPath();
-                ctx.arc(0, 0, game_config.birdRadius, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.stroke();
-
-                ctx.fillStyle = '#ffffff';
-                ctx.beginPath();
-                ctx.arc(6, -2, 2.5, 0, Math.PI * 2);
-                ctx.fill();
-
-                ctx.restore();
-            });
+        // 🚀 REPLACE THE OLD POWERUP DRAW CODE INSIDE YOUR Bird CLASS DRAW METHOD WITH THIS:
+        if (typeof powerUpsState !== "undefined" && powerUpsState.shadowClone) {
+            if (typeof clones !== "undefined" && Array.isArray(clones)) {
+                // Pure drawing execution layout. No updates, no splices, completely glitch-free!
+                for (let i = 0; i < clones.length; i++) {
+                    clones[i].draw();
+                }
+            }
         }
 
         if (powerUpsState.shield) {
@@ -519,6 +514,112 @@ class Bird {
             ctx.arc(0, 0, 170, 0, PIE_2);
             ctx.stroke();
             ctx.restore();
+        }
+    }
+}
+
+class ShadowClone {
+    constructor(leaderBird, xOffset, yOffset) {
+        this.leader = leaderBird;
+        this.xOffset = xOffset;
+        this.yOffset = yOffset;
+        
+        const baseRad = (typeof game_config !== "undefined" && game_config.birdRadius) ? game_config.birdRadius : 24;
+        this.radius = baseRad;
+        
+        // 🚀 POSITION FIX: Dynamically position the clones relative to the leader bird's core coordinates
+        this.x = this.leader.x + this.xOffset;
+        this.y = this.leader.y + this.yOffset;
+        
+        this.life = 720; // 12 seconds
+        this.isDead = false;
+        this.isClone = true; // 🚀 CRITICAL FLAG: Overrides player hit boxes completely!
+    }
+
+    update(dt) {
+        if (this.isDead) return;
+
+        const deltaTime = dt || 16.67;
+        const tf = deltaTime / 16.67;
+
+        // Smoothly follow behind the bird and handle jumps/ducks instantly
+        this.x = this.leader.x + this.xOffset;
+        this.y += ((this.leader.y + this.yOffset) - this.y) * 0.35 * tf;
+
+        // Screen Boundaries Lock
+        const displayHeight = (typeof canvasHeight === "number") ? canvasHeight : 600;
+        const groundH = (typeof game_config !== "undefined") ? game_config.groundHeight : 100;
+        const maxY = displayHeight - groundH - this.radius;
+        this.y = Math.max(this.radius + 10, Math.min(maxY, this.y));
+
+        this.harvestItems();
+
+        this.life -= 1 * tf;
+        if (this.life <= 0) {
+            this.isDead = true;
+        }
+    }
+
+    draw() {
+        if (this.isDead) return;
+
+        ctx.save();
+        ctx.shadowBlur = 0; // High performance hardware pipelines
+
+        const fCount = (typeof frameCount === "number") ? frameCount : 0;
+        const isLow = this.life < 120; // Under 2 seconds remaining
+
+        // Clean low-life neon warning pulse
+        let opacity = 0.45;
+        if (isLow) {
+            opacity = ((fCount >> 2) & 1) ? 0.65 : 0.10;
+        }
+        ctx.globalAlpha = opacity;
+
+        // Draw Translucent Neon Cyber Bird Skin
+        ctx.fillStyle = "#bd00ff";
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.5;
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Visor design detailing
+        ctx.fillStyle = "#00ffff";
+        ctx.fillRect(this.x + (this.radius * 0.2), this.y - (this.radius * 0.4), this.radius * 0.5, this.radius * 0.25);
+        ctx.restore();
+    }
+
+    harvestItems() {
+        const checkRangeSq = (this.radius + 20) * (this.radius + 20);
+
+        if (typeof coins !== "undefined" && Array.isArray(coins)) {
+            for (let i = coins.length - 1; i >= 0; i--) {
+                const coin = coins[i];
+                if (coin.collected || coin.isDead) continue;
+                const dx = this.x - coin.x;
+                const dy = this.y - coin.y;
+                if ((dx * dx + dy * dy) < checkRangeSq) {
+                    coin.collected = true;
+                    score += (typeof powerUpsState !== "undefined" && powerUpsState.doubleScore) ? 2 : 1;
+                    if (typeof createCoinExplosion === "function") createCoinExplosion(coin.x, coin.y);
+                }
+            }
+        }
+
+        if (typeof powerUps !== "undefined" && Array.isArray(powerUps)) {
+            for (let i = powerUps.length - 1; i >= 0; i--) {
+                const pu = powerUps[i];
+                if (pu.collected || pu.isDead) continue;
+                const dx = this.x - pu.x;
+                const dy = this.y - pu.y;
+                if ((dx * dx + dy * dy) < checkRangeSq) {
+                    pu.collected = true;
+                    if (typeof activatePowerUp === "function") activatePowerUp(pu.type);
+                }
+            }
         }
     }
 }
@@ -730,7 +831,7 @@ class Coin {
 
             ctx.fillStyle = coinGold;
             ctx.beginPath();
-            ctx.arc(0, 0, this.size / 2, 0, Math.PI * 2);
+            ctx.arc(0, 0, this.size / 2, 0, PIE_2);
             ctx.fill();
 
             ctx.shadowBlur = 0; // Clear shadow for crisp line work
@@ -741,7 +842,7 @@ class Coin {
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.arc(0, 0, (this.size / 2) - 3, 0, Math.PI * 2);
+            ctx.arc(0, 0, (this.size / 2) - 3, 0, PIE_2);
             ctx.stroke();
 
             ctx.fillStyle = edgeCopper;
@@ -860,7 +961,7 @@ class PowerUp {
                         ctx.globalAlpha = this.life / this.maxLife;
                         ctx.fillStyle = this.color;
                         ctx.beginPath();
-                        ctx.arc(this.x, this.y, 3, 0, Math.PI * 2);
+                        ctx.arc(this.x, this.y, 3, 0, PIE_2);
                         ctx.fill();
                         ctx.restore();
                     }
@@ -900,7 +1001,7 @@ class PowerUp {
             ctx.lineWidth = 2;
             ctx.setLineDash([8, 4]); 
             ctx.beginPath();
-            ctx.arc(0, 0, this.size * pulseScale * 1.3, 0, Math.PI * 2);
+            ctx.arc(0, 0, this.size * pulseScale * 1.3, 0, PIE_2);
             ctx.stroke();
             ctx.restore();
 
@@ -910,7 +1011,7 @@ class PowerUp {
             ctx.lineWidth = 1.5;
             ctx.setLineDash([2, 8]);
             ctx.beginPath();
-            ctx.arc(0, 0, this.size * pulseScale * 1.5, 0, Math.PI * 2);
+            ctx.arc(0, 0, this.size * pulseScale * 1.5, 0, PIE_2);
             ctx.stroke();
             ctx.restore();
 
@@ -925,14 +1026,14 @@ class PowerUp {
             ctx.strokeStyle = meta.color;
             ctx.lineWidth = 2.5;
             ctx.beginPath();
-            ctx.arc(0, 0, this.size * pulseScale, 0, Math.PI * 2);
+            ctx.arc(0, 0, this.size * pulseScale, 0, PIE_2);
             ctx.fill();
             ctx.stroke();
 
             // Glossy crescent highlights
             ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
             ctx.beginPath();
-            ctx.arc(-2, -2, this.size * pulseScale * 0.7, 0, Math.PI * 2);
+            ctx.arc(-2, -2, this.size * pulseScale * 0.7, 0, PIE_2);
             ctx.fill();
 
             // Layer 4: Symbol Rendering
@@ -1090,7 +1191,7 @@ class Bush {
         
         ctx.fillStyle = 'rgba(15, 45, 20, 0.4)'; // Vector ground shadow representation
         ctx.beginPath();
-        ctx.ellipse(0, 4, 22, 6, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, 4, 22, 6, 0, 0, PIE_2);
         ctx.fill();
 
         // Main Bush Cluster Fills
@@ -1105,9 +1206,9 @@ class Bush {
         // Layered Anime Style Inner Depth Textures
         ctx.fillStyle = '#1e5a2f';
         ctx.beginPath();
-        ctx.arc(-8, -8, 5, 0, Math.PI * 2);
-        ctx.arc(4, -12, 6, 0, Math.PI * 2);
-        ctx.arc(8, -8, 5, 0, Math.PI * 2);
+        ctx.arc(-8, -8, 5, 0, PIE_2);
+        ctx.arc(4, -12, 6, 0, PIE_2);
+        ctx.arc(8, -8, 5, 0, PIE_2);
         ctx.fill();
         
         ctx.restore();
@@ -1182,7 +1283,7 @@ class Star {
     constructor() {
         this.reset();
         // Generate a random initial phase so stars don't blink in unison
-        this.phase = Math.random() * Math.PI * 2; 
+        this.phase = Math.random() * PIE_2; 
     }
 
     reset() {
@@ -1206,7 +1307,7 @@ class Star {
         // Increment phase over time
         this.phase += this.speed; 
         // Keep phase values bound cleanly between 0 and 2*PI
-        if (this.phase > Math.PI * 2) this.phase -= Math.PI * 2;
+        if (this.phase > PIE_2) this.phase -= PIE_2;
     }
 
     draw() {
@@ -1238,7 +1339,7 @@ class Star {
         ctx.shadowBlur = 0; // Disable blur for sharp core
         ctx.fillStyle = `rgba(255, 255, 255, ${currentAlpha})`;
         ctx.beginPath();
-        ctx.arc(0, 0, this.radius * 0.6 * twinkle, 0, Math.PI * 2);
+        ctx.arc(0, 0, this.radius * 0.6 * twinkle, 0, PIE_2);
         ctx.fill();
     }
 }
@@ -1364,7 +1465,7 @@ function drawPowerUpMeters() {
 
                 // High-Contrast Digital Timer (Turns red and flashes if low)
                 ctx.fillStyle = isFlashingFrame ? "#ff1a26" : s.cA;
-                ctx.font = "900 16px monospace"; 
+                ctx.font = "900 18px monospace"; 
                 ctx.textAlign = "right";
                 ctx.fillText(secStr, pad + w, y - 6);
 
@@ -1454,7 +1555,7 @@ function drawPowerUpMeters() {
                 ctx.fillText("ACTIVE", pad + badgeSize + 28, y + (badgeSize / 2) + 4);
 
                 ctx.restore();
-                y += 56; 
+                y += 60; 
             }
         }
     } catch (hudError) {
@@ -1504,7 +1605,7 @@ class DrawGame {
             const x = (currentFrame * 0.15 + i * 130) % (curW + 100) - 50;
             const y = 70 + Math.sin(currentFrame * 0.01 + i) * 35 + i * 10;
             ctx.beginPath();
-            ctx.arc(x, y, 18, 0, Math.PI * 2);
+            ctx.arc(x, y, 18, 0, PIE_2);
             ctx.fill();
         }
         
@@ -1605,7 +1706,7 @@ class DrawGame {
         const curH = (typeof canvasHeight === "number") ? canvasHeight : 600;
         
         const t = currentWorldTime / currentDayLength;
-        const angle = t * Math.PI * 2 - Math.PI;
+        const angle = t * PIE_2 - Math.PI;
         const radius = 360;
         const cx = curW / 2 + curW / 4;
         const cy = curH / 6 * 3.5;
@@ -1627,12 +1728,12 @@ class DrawGame {
         sunGlow.addColorStop(1, "rgba(255, 202, 58, 0)");
         
         ctx.fillStyle = sunGlow;
-        ctx.beginPath(); ctx.arc(sunX, sunY, 90, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(sunX, sunY, 90, 0, PIE_2); ctx.fill();
         
         ctx.fillStyle = "#ffe27a";
         ctx.shadowColor = "rgba(236, 167, 76, 0.82)";
         ctx.shadowBlur = skyBrightness > 0.1 ? 20 : 0;
-        ctx.beginPath(); ctx.arc(sunX, sunY, 38, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(sunX, sunY, 38, 0, PIE_2); ctx.fill();
         ctx.restore();
 
         // Moon
@@ -1649,7 +1750,7 @@ class DrawGame {
         moonGlow.addColorStop(1, "rgba(0, 0, 0, 0)");           
         
         ctx.fillStyle = moonGlow;
-        ctx.beginPath(); ctx.arc(0, 0, moonR * 2.2, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(0, 0, moonR * 2.2, 0, PIE_2); ctx.fill();
         
         const moonGrad = ctx.createLinearGradient(-moonR, -moonR, moonR, moonR);
         moonGrad.addColorStop(0, "#ffffff");   
@@ -1722,7 +1823,7 @@ function updateWorldTime(dt) {
     }
     
     // Smooth parametric evaluation curve for time cycles
-    skyBrightness = (Math.sin((worldTime * Math.PI * 2) / currentDayLength - Math.PI / 2) + 1) / 2;
+    skyBrightness = (Math.sin((worldTime * PIE_2) / currentDayLength - Math.PI / 2) + 1) / 2;
 }
 
 function updateHud() {
@@ -1995,11 +2096,16 @@ function activatePowerUp(type) {
         case "shadowClone":
             powerUpsState.shadowClone = true;
             powerUpTimers.shadowClone = 12 * 60; // 12 seconds of invulnerable sidekick birds
-            // Instantiates clone helper tracking values
-            bird.clones = [
-                { yOffset: -50, phase: 0, alpha: 0 },
-                { yOffset: 50,  phase: Math.PI, alpha: 0 }
-            ];
+            // Add this conditional loop handler inside your power-up activation block scripts:
+            if (type === "shadowClone" || key === "shadowClone") {
+                if (typeof clones === "undefined") {
+                    window.clones = []; // Global initialization guard
+                }
+                
+                clones.length = 0; 
+                clones.push(new ShadowClone(bird, -65, -75));
+                clones.push(new ShadowClone(bird, -65, 75));
+            }
             break;
         case "coinBlast":
             if (typeof coins !== "undefined") {
@@ -2311,6 +2417,25 @@ function updateGameObjects(dt) {
                     }
                 }
             }
+
+            // 🚀 INJECT THIS INSIDE YOUR MAIN updateGameObjects(dt) LOGIC METHOD:
+            if (typeof clones !== "undefined" && Array.isArray(clones)) {
+                for (let i = clones.length - 1; i >= 0; i--) {
+                    const clone = clones[i];
+                    // 1. Process physics and automatic collections safely
+                    clone.update(dt);
+                    // 2. Remove expired items from system RAM cleanly with zero rendering lag
+                    if (clone.isDead) {
+                        clones.splice(i, 1);
+                    }
+                }
+
+                // Shut off power-up tracking flags if your whole team clears out
+                if (clones.length === 0 && typeof powerUpsState !== "undefined" && powerUpsState.shadowClone) {
+                    powerUpsState.shadowClone = false;
+                    if (typeof powerUpTimers !== "undefined") powerUpTimers.shadowClone = 0;
+                }
+            }
         }
 
         if (Array.isArray(powerUps)) {
@@ -2338,6 +2463,7 @@ function initGame({ jumpImmediately = true } = {}) {
         }
 
         bird = new Bird();
+        clones = [];
         pipes = [];
         trees = [];
         bushes = [];
@@ -2474,8 +2600,13 @@ function gameLoop(timestamp) {
                         saveStoredStats();
                     }
                     if (pipe.collidesWith(bird)) {
-                        screenShake(18);
-                        hitPlayer();
+                        if (typeof pipes !== "undefined" && Array.isArray(pipes)) {
+                            // Safety Check: If the entity passed into collidesWith has an 'isClone' flag, ignore it!
+                            if (!bird.isClone) {
+                                if (typeof screenShake === "function") screenShake(18);
+                                hitPlayer(); // Only kill the player if the real bird hits the obstacle
+                            }
+                        }
                     }
                 });
 
