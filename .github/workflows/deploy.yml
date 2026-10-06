@@ -1,0 +1,68 @@
+name: 🚀 Max Performance Game Deployer
+
+on:
+  push:
+    branches:
+      - main
+
+# Sets clear global permissions to make Pages deployments rock solid
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  # JOB 1: Build your assets at maximum performance
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: ⚡ Overclocked npm Cache Lock
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: 📦 Ultra-Fast Clean Install
+        run: npm ci --prefer-offline --no-audit --no-fund
+
+      - name: 🛠️ Execute Max-Compressed Build
+        run: |
+          export NODE_OPTIONS="--max-old-space-size=4096"
+          npm run build
+
+      - name: 🔏 Inject Control Overrides for Compressed Files
+        # Disables Jekyll processing completely and forces inclusion of .br and .gz extensions
+        run: |
+          touch dist/.nojekyll
+          echo "include: [js/*.br, js/*.gz, assets/*.br, assets/*.gz]" > dist/_config.yml
+
+      - name: 🌍 Upload Game Artifacts
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
+
+  # JOB 2: Safely pass optimized output directly to GitHub Pages CDN
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 🚀 Deploy to GitHub Pages (Live)
+        id: deployment
+        uses: actions/deploy-pages@v4

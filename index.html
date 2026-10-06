@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#11162b">
+  <meta name="description" content="Take off in Air Jumper: flap through the gates, chase shiny collectibles, and build your flight streak.">
+  <title>Air jumper — A little flight game</title>
+  <link rel="icon" href="./icons/air-jumper.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./src/css/styles.css">
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M3 14.5c4.2-.5 7.5-3 9.7-7.5.4 3 2.8 5 7.3 5.5-3.4 1-5.5 2.6-6.5 5-2-2.5-5.5-3.5-10.5-3Z" fill="currentColor"/><circle cx="16.2" cy="11.3" r=".75" fill="#49422d"/></svg>
+        </span>
+        AIR JUMPER
+      </div>
+      <button class="wallet-button" id="walletButton" type="button" aria-label="Open bird shop">
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.4" fill="#F7C64B" stroke="#FFE79A" stroke-width="1.2"/><path d="m10 5.7 1.15 2.65 2.9.23-2.2 1.9.7 2.8L10 11.75l-2.55 1.53.7-2.8-2.2-1.9 2.9-.23L10 5.7Z" fill="#FFF6D2"/></svg>
+        <span id="walletCount">0</span>
+        <span class="wallet-label">COINS</span>
+      </button>
+      <button class="sound-button" id="soundToggle" type="button" aria-pressed="true" aria-label="Turn sound off">
+        <svg id="soundIcon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M15.5 8.5a5 5 0 0 1 0 7m3-10a9 9 0 0 1 0 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <span id="soundLabel">Sound on</span>
+      </button>
+    </header>
+
+    <section class="flight-hub" aria-label="Air jumper flight hub">
+      <header class="flight-intro">
+        <div>
+          <p class="flight-kicker"><span aria-hidden="true">✦</span> YOUR NEXT LITTLE ADVENTURE</p>
+          <h1>Find your <span>flight.</span></h1>
+          <p class="flight-subtitle">One tap, a little courage, and a whole sky to explore.</p>
+        </div>
+      </header>
+      <div class="flight-layout">
+        <aside class="flight-sidebar sidebar-left" aria-label="Flight challenge">
+          <article class="info-card challenge-card">
+            <div class="card-heading">
+              <span class="card-icon challenge-icon" aria-hidden="true">✦</span>
+              <span class="card-label">FLIGHT CHALLENGE</span>
+            </div>
+            <h2>Keep the streak</h2>
+            <p>Pass five gates in a row and earn a bonus coin burst.</p>
+            <div class="challenge-meter" id="challengeMeter" role="progressbar" aria-label="Progress to next streak bonus" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0">
+              <div class="challenge-meter-fill" id="challengeMeterFill"></div>
+            </div>
+            <div class="challenge-foot">
+              <span id="challengeCount">0 / 5 gates</span>
+              <span class="challenge-reward">+3 <span aria-hidden="true">●</span></span>
+            </div>
+            <p class="challenge-note" id="challengeNote" aria-live="polite">Your next bonus is waiting up ahead.</p>
+          </article>
+
+          <article class="info-card flight-tip-card">
+            <div class="card-heading">
+              <span class="card-icon tip-icon" aria-hidden="true">↗</span>
+              <span class="card-label">FLIGHT TIP</span>
+            </div>
+            <h2>Little taps, big sky</h2>
+            <p>Short, steady flaps help you find the middle of each gate. Save your shield for a close call.</p>
+            <div class="tip-decoration" aria-hidden="true"><span>☁</span><i></i><span>✦</span></div>
+          </article>
+        </aside>
+
+        <section class="game-column" aria-label="Air jumper flight game">
+          <p class="game-heading" id="regionLabel" aria-live="polite">Mellow Meadow</p>
+          <div class="game-frame" id="gameFrame">
+            <canvas id="gameCanvas" width="1020" height="1440" aria-label="Game screen. Click, tap, or press Space to fly." role="img"></canvas>
+            <div class="hud" id="hud" hidden>
+              <div class="best-chip" aria-label="Best score">
+                <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="m10 1.7 2.2 4.5 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5-3.6-3.5 5-.7L10 1.7Z"/></svg>
+                <span>BEST</span><span id="bestScore">0</span>
+              </div>
+              <div class="combo-status" id="comboStatus" hidden></div>
+              <div class="power-status" id="powerStatus" hidden></div>
+              <button class="pause-button" id="pauseButton" type="button" aria-label="Pause game">
+                <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.5 3.5h2.7v9H4.5zm4.3 0h2.7v9H8.8z"/></svg>
+              </button>
+            </div>
+            <div class="score" id="score" aria-live="polite" hidden>0</div>
+            <div class="countdown" id="countdown" role="status" aria-live="assertive" hidden>3</div>
+            <div class="overlay" id="overlay">
+              <div class="panel">
+                <div class="bird-badge" aria-hidden="true">
+                  <svg viewBox="0 0 52 52" fill="none"><ellipse cx="25" cy="27" rx="16" ry="13" fill="#F8BA4F"/><path d="M18 29c4-7 11-8 17-4-1 7-7 11-16 9-2-1-3-3-1-5Z" fill="#E99B3C"/><circle cx="32" cy="23" r="3.1" fill="white"/><circle cx="33" cy="23" r="1.45" fill="#35464A"/><path d="m39 27 9 3-9 3-2-3 2-3Z" fill="#F18755"/><path d="M10 27c-4 1-6 4-6 8 5-1 9-3 12-6" fill="#F4A93C"/></svg>
+                </div>
+                <p class="eyebrow" id="eyebrow">Take a deep breath</p>
+                <h2 id="panelTitle">Ready to<br>take flight?</h2>
+                <p class="panel-copy" id="panelCopy">A little flap goes a long way. How far can you fly?</p>
+                <button class="play-button" id="playButton" type="button">
+                  <svg id="playIcon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M6 3.8a1 1 0 0 1 1.5-.86l9 5.2a1 1 0 0 1 0 1.73l-9 5.2a1 1 0 0 1-1.5-.86V3.8Z"/></svg>
+                  <span id="playLabel">Let’s fly</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="hint" aria-label="Game controls">
+            <span>Tap to flap</span>
+            <span aria-hidden="true">·</span>
+            <span>or press</span>
+            <span class="keycap">SPACE</span>
+            <span aria-hidden="true">·</span>
+            <span>collect coins, gems, stars &amp; boosts</span>
+          </div>
+        </section>
+
+        <aside class="flight-sidebar sidebar-right" aria-label="Flight journal and collectibles">
+          <article class="info-card journal-card">
+            <div class="card-heading">
+              <span class="card-icon journal-icon" aria-hidden="true">✧</span>
+              <span class="card-label">YOUR FLIGHT JOURNAL</span>
+            </div>
+            <div class="journal-stats">
+              <div><span>PERSONAL BEST</span><strong id="journalBest">0 <small>gates</small></strong></div>
+              <div><span>COIN WALLET</span><strong id="journalCoins">0 <small>coins</small></strong></div>
+              <div><span>YOUR BIRD</span><strong id="journalBird">Sunny</strong></div>
+            </div>
+            <button class="journal-shop-button" id="journalShopButton" type="button">Visit the bird shop <span aria-hidden="true">→</span></button>
+          </article>
+
+          <article class="info-card collection-card">
+            <div class="card-heading">
+              <span class="card-icon collection-icon" aria-hidden="true">◈</span>
+              <span class="card-label">THINGS TO FIND</span>
+            </div>
+            <ul class="collectible-list">
+              <li><span class="collectible-dot coin-dot" aria-hidden="true">●</span><span><strong>Coins</strong><small>Every coin brings a new bird closer.</small></span><b>+1</b></li>
+              <li><span class="collectible-dot gem-dot" aria-hidden="true">◆</span><span><strong>Gems</strong><small>A little sparkle, a bigger reward.</small></span><b>+5</b></li>
+              <li><span class="collectible-dot star-dot" aria-hidden="true">★</span><span><strong>Gold stars</strong><small>Rare finds are worth the chase.</small></span><b>+10</b></li>
+            </ul>
+          </article>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <dialog class="shop-dialog" id="shopDialog" aria-labelledby="shopTitle">
+    <div class="shop-header">
+      <div>
+        <p class="eyebrow">Your next look</p>
+        <h2 id="shopTitle">Bird shop</h2>
+      </div>
+      <button class="shop-close" id="shopClose" type="button" aria-label="Close bird shop">×</button>
+    </div>
+    <p class="shop-copy">Pick a little bird to take along. Unlock new colors with the coins you collect in flight.</p>
+    <div class="shop-wallet">
+      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.4" fill="#F7C64B" stroke="#FFE79A" stroke-width="1.2"/><path d="m10 5.7 1.15 2.65 2.9.23-2.2 1.9.7 2.8L10 11.75l-2.55 1.53.7-2.8-2.2-1.9 2.9-.23L10 5.7Z" fill="#FFF6D2"/></svg>
+      <span id="shopCoinCount">0 coins</span>
+    </div>
+    <div class="bird-grid" id="birdGrid">
+      <article class="bird-card" data-bird-card="sunny">
+        <span class="bird-swatch bird-swatch-sunny" aria-hidden="true"><span></span></span>
+        <h3>Sunny</h3><p>The original little flyer</p>
+        <button class="bird-action" type="button" data-bird="sunny">Selected</button>
+      </article>
+      <article class="bird-card" data-bird-card="sky">
+        <span class="bird-swatch bird-swatch-sky" aria-hidden="true"><span></span></span>
+        <h3>Bluebell</h3><p>A cool breeze kind of bird</p>
+        <button class="bird-action" type="button" data-bird="sky">Unlock · 80</button>
+      </article>
+      <article class="bird-card" data-bird-card="berry">
+        <span class="bird-swatch bird-swatch-berry" aria-hidden="true"><span></span></span>
+        <h3>Berry</h3><p>Bright as a summer day</p>
+        <button class="bird-action" type="button" data-bird="berry">Unlock · 160</button>
+      </article>
+      <article class="bird-card" data-bird-card="mint">
+        <span class="bird-swatch bird-swatch-mint" aria-hidden="true"><span></span></span>
+        <h3>Minty</h3><p>A fresh little breeze</p>
+        <button class="bird-action" type="button" data-bird="mint">Unlock · 240</button>
+      </article>
+      <article class="bird-card" data-bird-card="midnight">
+        <span class="bird-swatch bird-swatch-midnight" aria-hidden="true"><span></span></span>
+        <h3>Stardust</h3><p>Night-sky sparkle</p>
+        <button class="bird-action" type="button" data-bird="midnight">Unlock · 320</button>
+      </article>
+    </div>
+    <p class="shop-note" id="shopNote" aria-live="polite">Every coin brings a new color closer.</p>
+  </dialog>
+
+  <script type="module" src="./src/game.ts"></script>
+</body>
+</html>

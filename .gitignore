@@ -1,31 +1,74 @@
-# Built things
-_Debug/
-Compiled/
+# --- IDEs and Editors ---
+# IntelliJ, WebStorm, etc.
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
-# AudioCache can be rebuilt from sources
-AudioCache/
+# Visual Studio Code
+.vscode/
+!.vscode/extensions.json
+*.code-workspace
 
-# Lockfile
-_OpenInEditor.lock
+# Local history and crash dumps
+.history/
 
-# User settings
-Game.agf.user
-*.crm.user
+# --- System Files ---
+# macOS files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
 
-# Backups
-Game.agf.bak
-backup_acsprset.spr
+# Windows files
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
 
-# Memory dumps
-*.dmp
+# --- Dependencies ---
+# Third-party packages
+node_modules/
+jspm_packages/
+.pnpm-store/
 
-# Temporary files
-# temporarily created during sprite or room background compression
-~aclzw.tmp
-# temporary, main game data, before getting packed into exe
-game28.dta
-# temporary build of the game before being moved to Compiled/ folder
-*.exe
+# --- Build and Output ---
+# Vite production build output
+dist/
+dist-ssr/
 
-# Log files
-warnings.log
+# TypeScript build info cache
+*.tsbuildinfo
+
+# --- Testing and Coverage ---
+# Coverage reports
+coverage/
+*.lcov
+
+# Playwright/Cypress end-to-end testing artifacts
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# --- Environment Variables ---
+# Local environment files (contains secrets, NEVER commit these)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Allow committing the template/example file if you use one
+!.env.example
+
+# --- Logs ---
+# Diagnostic and error logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
